@@ -373,6 +373,8 @@ export class WebApiService {
         musicFolder: this.musicFolder,
         trackCount: this.library.search().length,
         isConfigured: this.config.isConfigured(),
+        version: '1.0.0',
+        dataDir: this.config.getDataDir(),
       });
     });
 

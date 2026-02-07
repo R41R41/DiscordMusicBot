@@ -6,13 +6,36 @@ const { spawn } = require('child_process');
 // 開発モードかどうか
 const isDev = process.argv.includes('--dev');
 
+// バージョン情報を取得
+const packageJson = require('../package.json');
+const APP_VERSION = packageJson.version || '1.0.0';
+
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;
+let logStream = null;
 
 // アプリのユーザーデータディレクトリを取得
 function getAppDataPath() {
   return path.join(app.getPath('userData'), 'DiscordMusicBot');
+}
+
+// ログファイルのパスを取得
+function getLogPath() {
+  const appDataPath = getAppDataPath();
+  return path.join(appDataPath, 'app.log');
+}
+
+// ログを書き込む
+function writeLog(message) {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}\n`;
+  
+  console.log(message);
+  
+  if (logStream) {
+    logStream.write(logMessage);
+  }
 }
 
 // 必要なディレクトリを作成
@@ -26,6 +49,15 @@ function ensureDirectories() {
       fs.mkdirSync(dir, { recursive: true });
     }
   });
+  
+  // ログファイルを初期化
+  const logPath = getLogPath();
+  logStream = fs.createWriteStream(logPath, { flags: 'a' });
+  writeLog('=== App started ===');
+  writeLog(`Version: ${APP_VERSION}`);
+  writeLog(`App data path: ${appDataPath}`);
+  writeLog(`Music path: ${musicPath}`);
+  writeLog(`Data path: ${dataPath}`);
   
   return { appDataPath, musicPath, dataPath };
 }
@@ -41,9 +73,17 @@ function startBackend() {
   const { musicPath, dataPath } = ensureDirectories();
   const backendPath = path.join(process.resourcesPath, 'backend');
   
-  console.log('Starting backend from:', backendPath);
-  console.log('Music folder:', musicPath);
-  console.log('Data folder:', dataPath);
+  writeLog(`Starting backend from: ${backendPath}`);
+  writeLog(`Music folder: ${musicPath}`);
+  writeLog(`Data folder: ${dataPath}`);
+  
+  // バックエンドのdistフォルダが存在するか確認
+  const indexPath = path.join(backendPath, 'dist', 'index.js');
+  if (!fs.existsSync(indexPath)) {
+    writeLog(`ERROR: Backend not found at ${indexPath}`);
+    return;
+  }
+  writeLog(`Backend index.js found at: ${indexPath}`);
   
   // 環境変数を設定
   const env = {
@@ -56,16 +96,29 @@ function startBackend() {
   backendProcess = spawn('node', ['dist/index.js'], {
     cwd: backendPath,
     shell: true,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: env
   });
 
+  // バックエンドの出力をログに書き込む
+  if (backendProcess.stdout) {
+    backendProcess.stdout.on('data', (data) => {
+      writeLog(`[Backend] ${data.toString().trim()}`);
+    });
+  }
+  
+  if (backendProcess.stderr) {
+    backendProcess.stderr.on('data', (data) => {
+      writeLog(`[Backend Error] ${data.toString().trim()}`);
+    });
+  }
+
   backendProcess.on('error', (err) => {
-    console.error('Backend error:', err);
+    writeLog(`Backend process error: ${err.message}`);
   });
 
   backendProcess.on('exit', (code) => {
-    console.log('Backend exited with code:', code);
+    writeLog(`Backend exited with code: ${code}`);
   });
 }
 
@@ -143,6 +196,37 @@ function createTray() {
       type: 'separator'
     },
     {
+      label: 'ログを開く',
+      click: () => {
+        const logPath = getLogPath();
+        shell.openPath(logPath);
+      }
+    },
+    {
+      label: 'データフォルダを開く',
+      click: () => {
+        shell.openPath(getAppDataPath());
+      }
+    },
+    {
+      label: 'DevTools',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.webContents.openDevTools();
+        }
+      }
+    },
+    {
+      type: 'separator'
+    },
+    {
+      label: `バージョン ${APP_VERSION}`,
+      enabled: false
+    },
+    {
+      type: 'separator'
+    },
+    {
       label: '終了',
       click: () => {
         app.isQuitting = true;
@@ -151,7 +235,7 @@ function createTray() {
     }
   ]);
 
-  tray.setToolTip('Discord Music Bot');
+  tray.setToolTip(`Discord Music Bot v${APP_VERSION}`);
   tray.setContextMenu(contextMenu);
 
   // トレイアイコンをダブルクリックでウィンドウを表示

@@ -126,6 +126,8 @@ export interface SystemStatus {
   musicFolder: string;
   trackCount: number;
   isConfigured: boolean;
+  version: string;
+  dataDir: string;
 }
 
 export const getSettings = () => fetchJson<AppSettings>('/api/settings');

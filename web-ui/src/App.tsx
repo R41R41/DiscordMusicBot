@@ -503,6 +503,9 @@ function App() {
         <h1>
           <Music size={24} />
           Discord Music Bot
+          {systemStatus?.version && (
+            <span className="version-badge">v{systemStatus.version}</span>
+          )}
         </h1>
       </header>
 
@@ -807,6 +810,18 @@ function App() {
                       <AlertCircle size={14} /> {settingsError}
                     </span>
                   )}
+                </div>
+
+                {/* デバッグ情報 */}
+                <div className="settings-section">
+                  <h3 className="settings-title">デバッグ情報</h3>
+                  <div className="debug-info">
+                    <p>データディレクトリ: <code>{systemStatus?.dataDir || '不明'}</code></p>
+                    <p>音楽フォルダ: <code>{systemStatus?.musicFolder || '不明'}</code></p>
+                    <p className="debug-hint">
+                      ※ 問題が発生した場合は、タスクトレイのアイコンを右クリックして「ログを開く」で詳細を確認できます。
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
