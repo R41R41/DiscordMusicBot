@@ -16,12 +16,17 @@ import {
   Search,
   RefreshCw,
   ListPlus,
+  Settings,
+  FolderOpen,
+  Save,
+  AlertCircle,
+  CheckCircle,
 } from 'lucide-react';
 import type { PlayerState, Track, Playlist, GuildInfo, ChannelInfo, LoopMode } from './types';
 import * as api from './api';
 import './index.css';
 
-type TabType = 'library' | 'playlists' | 'queue';
+type TabType = 'library' | 'playlists' | 'queue' | 'settings';
 
 // コンテキストメニューの型
 interface ContextMenuState {
@@ -69,6 +74,16 @@ function App() {
     trackTitle: '',
     source: 'library',
   });
+
+  // 設定関連
+  const [settings, setSettings] = useState<api.AppSettings | null>(null);
+  const [systemStatus, setSystemStatus] = useState<api.SystemStatus | null>(null);
+  const [settingsForm, setSettingsForm] = useState({
+    discordToken: '',
+    musicFolder: '',
+  });
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
 
   // WebSocket接続
   useEffect(() => {
@@ -119,16 +134,24 @@ function App() {
 
   const loadInitialData = async () => {
     try {
-      const [state, guildList, trackList, playlistList] = await Promise.all([
+      const [state, guildList, trackList, playlistList, settingsData, statusData] = await Promise.all([
         api.getPlayerState(),
         api.getGuilds(),
         api.getLibrary(),
         api.getPlaylists(),
+        api.getSettings(),
+        api.getSystemStatus(),
       ]);
       setPlayerState(state);
       setGuilds(guildList);
       setTracks(trackList);
       setPlaylists(playlistList);
+      setSettings(settingsData);
+      setSystemStatus(statusData);
+      setSettingsForm({
+        discordToken: '',
+        musicFolder: settingsData.currentMusicFolder || '',
+      });
 
       if (state.guildId) {
         setSelectedGuild(state.guildId);
@@ -423,6 +446,48 @@ function App() {
     }
   };
 
+  // ===== 設定操作 =====
+  const handleSaveSettings = async () => {
+    try {
+      setSettingsError('');
+      setSettingsSaved(false);
+      
+      const updates: { discordToken?: string; musicFolder?: string } = {};
+      if (settingsForm.discordToken) {
+        updates.discordToken = settingsForm.discordToken;
+      }
+      if (settingsForm.musicFolder) {
+        updates.musicFolder = settingsForm.musicFolder;
+      }
+
+      const result = await api.saveSettings(updates);
+      setSettings(result.config);
+      setSettingsSaved(true);
+      setSettingsForm(prev => ({ ...prev, discordToken: '' }));
+      
+      // ステータスを更新
+      const statusData = await api.getSystemStatus();
+      setSystemStatus(statusData);
+
+      if (result.needsRestart) {
+        setSettingsError('設定を反映するにはアプリを再起動してください');
+      }
+
+      setTimeout(() => setSettingsSaved(false), 3000);
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      setSettingsError('設定の保存に失敗しました');
+    }
+  };
+
+  const handleOpenMusicFolder = async () => {
+    try {
+      await api.openMusicFolder();
+    } catch (error) {
+      console.error('Failed to open folder:', error);
+    }
+  };
+
   // ===== レンダリング =====
   const getLoopIcon = () => {
     if (playerState?.loop === 'one') return <Repeat1 size={18} />;
@@ -466,6 +531,12 @@ function App() {
               {playerState && playerState.queue.length > 0 && (
                 <span className="queue-count"> ({playerState.queue.length})</span>
               )}
+            </button>
+            <button
+              className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
+              onClick={() => setActiveTab('settings')}
+            >
+              <Settings size={16} /> 設定
             </button>
           </div>
 
@@ -659,6 +730,86 @@ function App() {
                 )}
               </div>
             </>
+          )}
+
+          {/* Settings Tab */}
+          {activeTab === 'settings' && (
+            <div className="settings-panel">
+              <div className="card-body">
+                {/* ステータス */}
+                <div className="settings-section">
+                  <h3 className="settings-title">ステータス</h3>
+                  <div className="status-grid">
+                    <div className="status-item">
+                      <span className="status-label">Discord接続</span>
+                      <span className={`status-value ${systemStatus?.discordConnected ? 'success' : 'error'}`}>
+                        {systemStatus?.discordConnected ? (
+                          <><CheckCircle size={14} /> 接続中</>
+                        ) : (
+                          <><AlertCircle size={14} /> 未接続</>
+                        )}
+                      </span>
+                    </div>
+                    <div className="status-item">
+                      <span className="status-label">曲数</span>
+                      <span className="status-value">{systemStatus?.trackCount || 0} 曲</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Discord Token */}
+                <div className="settings-section">
+                  <h3 className="settings-title">Discord Bot Token</h3>
+                  <p className="settings-description">
+                    {settings?.hasToken 
+                      ? `設定済み: ${settings.discordToken}`
+                      : 'トークンが設定されていません'}
+                  </p>
+                  <div className="input-group">
+                    <input
+                      type="password"
+                      className="input"
+                      placeholder="新しいトークンを入力..."
+                      value={settingsForm.discordToken}
+                      onChange={(e) => setSettingsForm(prev => ({ ...prev, discordToken: e.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                {/* Music Folder */}
+                <div className="settings-section">
+                  <h3 className="settings-title">音楽フォルダ</h3>
+                  <p className="settings-description">
+                    現在のフォルダ: {settings?.currentMusicFolder || '未設定'}
+                  </p>
+                  <div className="input-group">
+                    <button className="btn btn-secondary" onClick={handleOpenMusicFolder}>
+                      <FolderOpen size={16} /> フォルダを開く
+                    </button>
+                    <button className="btn btn-secondary" onClick={handleRescan} disabled={isLoading}>
+                      <RefreshCw size={16} className={isLoading ? 'spin' : ''} /> 再スキャン
+                    </button>
+                  </div>
+                </div>
+
+                {/* 保存ボタン */}
+                <div className="settings-section">
+                  <button className="btn btn-primary" onClick={handleSaveSettings}>
+                    <Save size={16} /> 設定を保存
+                  </button>
+                  {settingsSaved && (
+                    <span className="save-success">
+                      <CheckCircle size={14} /> 保存しました
+                    </span>
+                  )}
+                  {settingsError && (
+                    <span className="save-error">
+                      <AlertCircle size={14} /> {settingsError}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 

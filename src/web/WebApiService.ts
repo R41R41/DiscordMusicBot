@@ -2,12 +2,16 @@ import express, { Express, Request, Response, NextFunction } from 'express';
 import { createServer, Server as HttpServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
+import { exec } from 'child_process';
+import path from 'path';
+import fs from 'fs';
 
 import type { PlayerState, LoopMode } from '../types.js';
 import { PlayerService } from '../player/PlayerService.js';
 import { LibraryService } from '../library/LibraryService.js';
 import { PlaylistService } from '../playlists/PlaylistService.js';
 import { DiscordAdapter } from '../discord/DiscordAdapter.js';
+import { ConfigService } from '../config/ConfigService.js';
 
 export class WebApiService {
   private app: Express;
@@ -19,19 +23,25 @@ export class WebApiService {
   private library: LibraryService;
   private playlists: PlaylistService;
   private adapter: DiscordAdapter;
+  private config: ConfigService;
+  private musicFolder: string;
 
   constructor(
     port: number,
     player: PlayerService,
     library: LibraryService,
     playlists: PlaylistService,
-    adapter: DiscordAdapter
+    adapter: DiscordAdapter,
+    config: ConfigService,
+    musicFolder: string
   ) {
     this.port = port;
     this.player = player;
     this.library = library;
     this.playlists = playlists;
     this.adapter = adapter;
+    this.config = config;
+    this.musicFolder = musicFolder;
 
     this.app = express();
     this.httpServer = createServer(this.app);
@@ -278,6 +288,92 @@ export class WebApiService {
       } catch (error) {
         res.status(400).json({ error: String(error) });
       }
+    });
+
+    // ===== Settings =====
+    this.app.get('/api/settings', (req, res) => {
+      const config = this.config.get();
+      // トークンは一部マスク
+      const maskedToken = config.discordToken 
+        ? config.discordToken.slice(0, 10) + '...' + config.discordToken.slice(-5)
+        : '';
+      res.json({
+        ...config,
+        discordToken: maskedToken,
+        hasToken: !!this.config.getDiscordToken(),
+        isConfigured: this.config.isConfigured(),
+        currentMusicFolder: this.musicFolder,
+      });
+    });
+
+    this.app.post('/api/settings', (req, res) => {
+      try {
+        const { discordToken, musicFolder, webPort } = req.body;
+        const updates: Record<string, unknown> = {};
+        
+        if (discordToken !== undefined && discordToken !== '') {
+          updates.discordToken = discordToken;
+          // .envファイルにも保存
+          this.config.saveToEnv(discordToken);
+        }
+        if (musicFolder !== undefined) {
+          updates.musicFolder = musicFolder;
+        }
+        if (webPort !== undefined) {
+          updates.webPort = webPort;
+        }
+
+        const updated = this.config.update(updates);
+        res.json({ 
+          success: true, 
+          config: updated,
+          needsRestart: !!discordToken || !!musicFolder,
+        });
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
+    });
+
+    // ===== System =====
+    this.app.post('/api/system/open-folder', (req, res) => {
+      try {
+        const folderPath = this.musicFolder;
+        
+        if (!fs.existsSync(folderPath)) {
+          fs.mkdirSync(folderPath, { recursive: true });
+        }
+
+        // OSに応じてフォルダを開く
+        const platform = process.platform;
+        let command: string;
+        
+        if (platform === 'win32') {
+          command = `explorer "${folderPath}"`;
+        } else if (platform === 'darwin') {
+          command = `open "${folderPath}"`;
+        } else {
+          command = `xdg-open "${folderPath}"`;
+        }
+
+        exec(command, (error) => {
+          if (error) {
+            console.error('Failed to open folder:', error);
+          }
+        });
+
+        res.json({ success: true, path: folderPath });
+      } catch (error) {
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    this.app.get('/api/system/status', (req, res) => {
+      res.json({
+        discordConnected: this.adapter.isReady(),
+        musicFolder: this.musicFolder,
+        trackCount: this.library.search().length,
+        isConfigured: this.config.isConfigured(),
+      });
     });
 
     // エラーハンドラー

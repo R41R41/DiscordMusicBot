@@ -2,12 +2,19 @@
   "name": "discord-music-bot",
   "version": "1.0.0",
   "description": "BGM共有 Discord Bot + Web UI",
-  "main": "dist/index.js",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:web": "cd web-ui && npm run dev",
+    "dev:electron": "electron electron/main.cjs --dev",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "build:web": "cd web-ui && npm run build",
+    "build:all": "npm run build && npm run build:web",
+    "start": "node dist/index.js",
+    "electron": "electron electron/main.cjs",
+    "dist": "npm run build:all && electron-builder",
+    "dist:win": "npm run build:all && electron-builder --win"
   },
   "keywords": [
     "discord",
@@ -32,7 +39,53 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/node": "^20.11.10",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
+  },
+  "build": {
+    "appId": "com.discord.musicbot",
+    "productName": "Discord Music Bot",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "web-ui/dist/**/*",
+      "data/**/*",
+      "music/.gitkeep",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "backend/dist"
+      },
+      {
+        "from": "data",
+        "to": "backend/data"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "electron/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "forceCodeSigning": false,
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Discord Music Bot"
+    }
   }
 }

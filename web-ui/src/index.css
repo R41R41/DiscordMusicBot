@@ -661,3 +661,100 @@ body {
 .context-menu-danger:hover {
   background: var(--primary-light);
 }
+
+/* Settings Panel */
+.settings-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.settings-section {
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section:last-child {
+  border-bottom: none;
+}
+
+.settings-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--space-sm);
+  color: var(--text);
+}
+
+.settings-description {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  margin-bottom: var(--space-sm);
+  word-break: break-all;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-sm);
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.status-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.status-value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.status-value.success {
+  color: #22c55e;
+}
+
+.status-value.error {
+  color: var(--primary);
+}
+
+.settings-section .input-group {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.settings-section .input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.save-success {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: #22c55e;
+  font-size: 0.875rem;
+  margin-left: var(--space-sm);
+}
+
+.save-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--primary);
+  font-size: 0.875rem;
+  margin-left: var(--space-sm);
+}

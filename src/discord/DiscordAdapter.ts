@@ -78,6 +78,10 @@ export class DiscordAdapter {
     await this.client.destroy();
   }
 
+  isReady(): boolean {
+    return this.client.isReady();
+  }
+
   // ===== Guild/Channel 情報取得 =====
   getGuilds(): GuildInfo[] {
     return this.client.guilds.cache.map((guild) => ({

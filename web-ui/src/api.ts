@@ -111,6 +111,33 @@ export const updateSettings = (settings: { volume?: number; loop?: LoopMode; shu
     body: JSON.stringify(settings),
   });
 
+// Settings
+export interface AppSettings {
+  discordToken: string;
+  musicFolder: string;
+  webPort: number;
+  hasToken: boolean;
+  isConfigured: boolean;
+  currentMusicFolder: string;
+}
+
+export interface SystemStatus {
+  discordConnected: boolean;
+  musicFolder: string;
+  trackCount: number;
+  isConfigured: boolean;
+}
+
+export const getSettings = () => fetchJson<AppSettings>('/api/settings');
+export const saveSettings = (settings: { discordToken?: string; musicFolder?: string; webPort?: number }) =>
+  fetchJson<{ success: boolean; config: AppSettings; needsRestart: boolean }>('/api/settings', {
+    method: 'POST',
+    body: JSON.stringify(settings),
+  });
+export const openMusicFolder = () =>
+  fetchJson<{ success: boolean; path: string }>('/api/system/open-folder', { method: 'POST' });
+export const getSystemStatus = () => fetchJson<SystemStatus>('/api/system/status');
+
 // ===== WebSocket =====
 let socket: Socket | null = null;
 

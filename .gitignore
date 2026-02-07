@@ -29,3 +29,10 @@ music/*
 # User data (keep structure, not content)
 data/playlists.json
 data/settings.json
+data/config.json
+
+# Electron build output
+release/
+
+# Misc
+nul
