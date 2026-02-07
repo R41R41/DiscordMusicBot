@@ -1,23 +1,44 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { Config, Settings, Playlist } from '../types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '../../data');
+
+// 環境変数優先でデータディレクトリを決定
+function getDataDir(): string {
+  return process.env.DATA_DIR || join(__dirname, '../../data');
+}
 
 // ===== Config =====
 export function loadConfig(): Config {
-  const configPath = join(DATA_DIR, 'config.json');
-  if (!existsSync(configPath)) {
-    throw new Error('config.json not found in data folder');
+  const dataDir = getDataDir();
+  const configPath = join(dataDir, 'config.json');
+  
+  // デフォルト値
+  const defaultConfig: Config = {
+    musicFolder: process.env.MUSIC_FOLDER || join(process.cwd(), 'music'),
+    webPort: parseInt(process.env.WEB_PORT || '3001', 10),
+    supportedFormats: ['.mp3', '.wav', '.flac', '.ogg', '.m4a'],
+  };
+  
+  // config.jsonがあれば読み込み、なければデフォルト
+  if (existsSync(configPath)) {
+    try {
+      const loaded = JSON.parse(readFileSync(configPath, 'utf-8'));
+      return { ...defaultConfig, ...loaded };
+    } catch {
+      return defaultConfig;
+    }
   }
-  return JSON.parse(readFileSync(configPath, 'utf-8'));
+  
+  return defaultConfig;
 }
 
 // ===== Settings =====
 export function loadSettings(): Settings {
-  const settingsPath = join(DATA_DIR, 'settings.json');
+  const dataDir = getDataDir();
+  const settingsPath = join(dataDir, 'settings.json');
   if (!existsSync(settingsPath)) {
     return { volume: 50, loop: 'off', shuffle: false };
   }
@@ -25,13 +46,19 @@ export function loadSettings(): Settings {
 }
 
 export function saveSettings(settings: Settings): void {
-  const settingsPath = join(DATA_DIR, 'settings.json');
+  const dataDir = getDataDir();
+  // ディレクトリがなければ作成
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true });
+  }
+  const settingsPath = join(dataDir, 'settings.json');
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
 }
 
 // ===== Playlists =====
 export function loadPlaylists(): Playlist[] {
-  const playlistsPath = join(DATA_DIR, 'playlists.json');
+  const dataDir = getDataDir();
+  const playlistsPath = join(dataDir, 'playlists.json');
   if (!existsSync(playlistsPath)) {
     return [];
   }
@@ -40,6 +67,11 @@ export function loadPlaylists(): Playlist[] {
 }
 
 export function savePlaylists(playlists: Playlist[]): void {
-  const playlistsPath = join(DATA_DIR, 'playlists.json');
+  const dataDir = getDataDir();
+  // ディレクトリがなければ作成
+  if (!existsSync(dataDir)) {
+    mkdirSync(dataDir, { recursive: true });
+  }
+  const playlistsPath = join(dataDir, 'playlists.json');
   writeFileSync(playlistsPath, JSON.stringify({ playlists }, null, 2), 'utf-8');
 }

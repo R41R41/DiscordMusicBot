@@ -313,8 +313,6 @@ export class WebApiService {
         
         if (discordToken !== undefined && discordToken !== '') {
           updates.discordToken = discordToken;
-          // .envファイルにも保存
-          this.config.saveToEnv(discordToken);
         }
         if (musicFolder !== undefined) {
           updates.musicFolder = musicFolder;
@@ -323,6 +321,7 @@ export class WebApiService {
           updates.webPort = webPort;
         }
 
+        console.log('Saving settings:', Object.keys(updates));
         const updated = this.config.update(updates);
         res.json({ 
           success: true, 
@@ -330,6 +329,7 @@ export class WebApiService {
           needsRestart: !!discordToken || !!musicFolder,
         });
       } catch (error) {
+        console.error('Failed to save settings:', error);
         res.status(400).json({ error: String(error) });
       }
     });

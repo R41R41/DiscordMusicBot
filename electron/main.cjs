@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, shell } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
 // 開発モードかどうか
@@ -9,6 +10,26 @@ let mainWindow = null;
 let tray = null;
 let backendProcess = null;
 
+// アプリのユーザーデータディレクトリを取得
+function getAppDataPath() {
+  return path.join(app.getPath('userData'), 'DiscordMusicBot');
+}
+
+// 必要なディレクトリを作成
+function ensureDirectories() {
+  const appDataPath = getAppDataPath();
+  const musicPath = path.join(appDataPath, 'music');
+  const dataPath = path.join(appDataPath, 'data');
+  
+  [appDataPath, musicPath, dataPath].forEach(dir => {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  });
+  
+  return { appDataPath, musicPath, dataPath };
+}
+
 // バックエンドの起動
 function startBackend() {
   // 開発モードではバックエンドは別途起動済みなのでスキップ
@@ -17,15 +38,26 @@ function startBackend() {
     return;
   }
 
+  const { musicPath, dataPath } = ensureDirectories();
   const backendPath = path.join(process.resourcesPath, 'backend');
   
   console.log('Starting backend from:', backendPath);
+  console.log('Music folder:', musicPath);
+  console.log('Data folder:', dataPath);
+  
+  // 環境変数を設定
+  const env = {
+    ...process.env,
+    MUSIC_FOLDER: musicPath,
+    DATA_DIR: dataPath,
+    WEB_PORT: '3001',
+  };
   
   backendProcess = spawn('node', ['dist/index.js'], {
     cwd: backendPath,
     shell: true,
     stdio: 'inherit',
-    env: { ...process.env }
+    env: env
   });
 
   backendProcess.on('error', (err) => {
@@ -44,6 +76,7 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
+    title: 'Discord Music Bot',
     icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       nodeIntegration: false,

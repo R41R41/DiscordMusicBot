@@ -15,10 +15,13 @@ const DEFAULT_CONFIG: AppConfig = {
 
 export class ConfigService {
   private configPath: string;
+  private dataDir: string;
   private config: AppConfig;
 
   constructor(dataDir: string) {
+    this.dataDir = dataDir;
     this.configPath = path.join(dataDir, 'config.json');
+    console.log('ConfigService: configPath =', this.configPath);
     this.config = this.load();
   }
 
@@ -27,21 +30,26 @@ export class ConfigService {
       if (fs.existsSync(this.configPath)) {
         const data = fs.readFileSync(this.configPath, 'utf-8');
         const loaded = JSON.parse(data);
+        console.log('ConfigService: loaded config from', this.configPath);
         return { ...DEFAULT_CONFIG, ...loaded };
       }
     } catch (error) {
       console.error('Failed to load config:', error);
     }
+    console.log('ConfigService: using default config');
     return { ...DEFAULT_CONFIG };
   }
 
   private save(): void {
     try {
-      const dir = path.dirname(this.configPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      // ディレクトリがなければ作成
+      if (!fs.existsSync(this.dataDir)) {
+        console.log('ConfigService: creating data directory:', this.dataDir);
+        fs.mkdirSync(this.dataDir, { recursive: true });
       }
+      console.log('ConfigService: saving config to', this.configPath);
       fs.writeFileSync(this.configPath, JSON.stringify(this.config, null, 2));
+      console.log('ConfigService: config saved successfully');
     } catch (error) {
       console.error('Failed to save config:', error);
       throw error;
@@ -53,6 +61,7 @@ export class ConfigService {
   }
 
   update(updates: Partial<AppConfig>): AppConfig {
+    console.log('ConfigService: updating config with', updates);
     this.config = { ...this.config, ...updates };
     this.save();
     return this.get();
@@ -79,34 +88,7 @@ export class ConfigService {
     return !!this.getDiscordToken() && !!this.getMusicFolder();
   }
 
-  // .envファイルにトークンを保存（互換性のため）
-  saveToEnv(token: string): void {
-    const envPath = path.join(process.cwd(), '.env');
-    let content = '';
-    
-    try {
-      if (fs.existsSync(envPath)) {
-        content = fs.readFileSync(envPath, 'utf-8');
-      }
-    } catch {
-      // ファイルが存在しない場合は空で開始
-    }
-
-    // DISCORD_TOKEN行を更新または追加
-    const lines = content.split('\n');
-    let found = false;
-    const newLines = lines.map(line => {
-      if (line.startsWith('DISCORD_TOKEN=')) {
-        found = true;
-        return `DISCORD_TOKEN=${token}`;
-      }
-      return line;
-    });
-
-    if (!found) {
-      newLines.push(`DISCORD_TOKEN=${token}`);
-    }
-
-    fs.writeFileSync(envPath, newLines.join('\n').trim() + '\n');
+  getDataDir(): string {
+    return this.dataDir;
   }
 }

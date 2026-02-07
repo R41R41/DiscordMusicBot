@@ -12,8 +12,9 @@ import { loadConfig } from './utils/config.js';
 async function main() {
   console.log('Starting Discord Music Bot...');
 
-  // 設定サービス初期化
-  const dataDir = path.join(process.cwd(), 'data');
+  // 設定サービス初期化（環境変数優先）
+  const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data');
+  console.log(`Data directory: ${dataDir}`);
   const configService = new ConfigService(dataDir);
 
   // 設定読み込み（環境変数優先）

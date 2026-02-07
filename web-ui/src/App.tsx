@@ -502,7 +502,7 @@ function App() {
       <header className="header">
         <h1>
           <Music size={24} />
-          BGM Player
+          Discord Music Bot
         </h1>
       </header>
 
