@@ -1,0 +1,5 @@
+{
+  "musicFolder": "C:\\Users\\aryo0\\OneDrive\\デスクトップ\\shannon\\DiscordMusicBot\\music",
+  "webPort": 3001,
+  "supportedFormats": ["mp3", "wav", "flac", "ogg", "m4a"]
+}

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  discord-music-bot:
+    build: .
+    container_name: discord-music-bot
+    restart: unless-stopped
+    ports:
+      - "3001:3001"   # API
+      - "5173:5173"   # Web UI
+    volumes:
+      - ./music:/app/music          # 音源フォルダ
+      - ./data:/app/data            # 設定・プレイリスト
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+    env_file:
+      - .env
