@@ -91,16 +91,25 @@ export class WebApiService {
 
     // ===== Playlists =====
     this.app.get('/api/playlists', (req, res) => {
-      res.json(this.playlists.getAll());
+      const all = this.playlists.getAll();
+      console.log(`[API] GET /api/playlists -> ${all.length} playlists`);
+      res.json(all);
     });
 
     this.app.post('/api/playlists', (req, res) => {
       try {
         const { name } = req.body;
-        const playlist = this.playlists.create(name);
+        console.log(`[API] POST /api/playlists name="${name}"`);
+        if (!name || typeof name !== 'string' || !name.trim()) {
+          return res.status(400).json({ error: 'Playlist name is required' });
+        }
+        const playlist = this.playlists.create(name.trim());
         res.json(playlist);
-      } catch (error) {
-        res.status(400).json({ error: String(error) });
+      } catch (error: any) {
+        console.error(`[API] POST /api/playlists error:`, error);
+        const message = error?.message || String(error);
+        const statusCode = message.includes('already exists') ? 409 : 400;
+        res.status(statusCode).json({ error: message });
       }
     });
 
@@ -125,8 +134,15 @@ export class WebApiService {
 
     this.app.post('/api/playlists/:name/tracks', (req, res) => {
       try {
-        const { trackId } = req.body;
-        this.playlists.addTrack(req.params.name, trackId);
+        const { trackId, trackIds } = req.body;
+        // 複数トラック対応
+        if (trackIds && Array.isArray(trackIds)) {
+          for (const id of trackIds) {
+            this.playlists.addTrack(req.params.name, id);
+          }
+        } else {
+          this.playlists.addTrack(req.params.name, trackId);
+        }
         res.json({ success: true });
       } catch (error) {
         res.status(400).json({ error: String(error) });
@@ -184,8 +200,15 @@ export class WebApiService {
 
     this.app.post('/api/player/queue', (req, res) => {
       try {
-        const { trackId } = req.body;
-        this.player.addToQueue(trackId);
+        const { trackId, trackIds } = req.body;
+        // 複数トラック対応
+        if (trackIds && Array.isArray(trackIds)) {
+          for (const id of trackIds) {
+            this.player.addToQueue(id);
+          }
+        } else {
+          this.player.addToQueue(trackId);
+        }
         res.json({ success: true });
       } catch (error) {
         res.status(400).json({ error: String(error) });
@@ -195,8 +218,15 @@ export class WebApiService {
     // 次に再生（キューの先頭に追加）
     this.app.post('/api/player/queue/next', (req, res) => {
       try {
-        const { trackId } = req.body;
-        this.player.playNextInQueue(trackId);
+        const { trackId, trackIds } = req.body;
+        // 複数トラック対応（逆順で先頭に追加して順番を維持）
+        if (trackIds && Array.isArray(trackIds)) {
+          for (const id of [...trackIds].reverse()) {
+            this.player.playNextInQueue(id);
+          }
+        } else {
+          this.player.playNextInQueue(trackId);
+        }
         res.json({ success: true });
       } catch (error) {
         res.status(400).json({ error: String(error) });
@@ -294,7 +324,7 @@ export class WebApiService {
     this.app.get('/api/settings', (req, res) => {
       const config = this.config.get();
       // トークンは一部マスク
-      const maskedToken = config.discordToken 
+      const maskedToken = config.discordToken
         ? config.discordToken.slice(0, 10) + '...' + config.discordToken.slice(-5)
         : '';
       res.json({
@@ -310,7 +340,7 @@ export class WebApiService {
       try {
         const { discordToken, musicFolder, webPort } = req.body;
         const updates: Record<string, unknown> = {};
-        
+
         if (discordToken !== undefined && discordToken !== '') {
           updates.discordToken = discordToken;
         }
@@ -323,8 +353,8 @@ export class WebApiService {
 
         console.log('Saving settings:', Object.keys(updates));
         const updated = this.config.update(updates);
-        res.json({ 
-          success: true, 
+        res.json({
+          success: true,
           config: updated,
           needsRestart: !!discordToken || !!musicFolder,
         });
@@ -338,7 +368,7 @@ export class WebApiService {
     this.app.post('/api/system/open-folder', (req, res) => {
       try {
         const folderPath = this.musicFolder;
-        
+
         if (!fs.existsSync(folderPath)) {
           fs.mkdirSync(folderPath, { recursive: true });
         }
@@ -346,9 +376,10 @@ export class WebApiService {
         // OSに応じてフォルダを開く
         const platform = process.platform;
         let command: string;
-        
+
         if (platform === 'win32') {
-          command = `explorer "${folderPath}"`;
+          // Windowsではstartコマンドを使用（explorerは終了コード1を返すため）
+          command = `start "" "${folderPath}"`;
         } else if (platform === 'darwin') {
           command = `open "${folderPath}"`;
         } else {
@@ -356,7 +387,8 @@ export class WebApiService {
         }
 
         exec(command, (error) => {
-          if (error) {
+          // Windowsのexplorerは成功してもエラーを返すことがあるので無視
+          if (error && platform !== 'win32') {
             console.error('Failed to open folder:', error);
           }
         });

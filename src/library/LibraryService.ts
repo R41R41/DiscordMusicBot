@@ -35,6 +35,9 @@ export class LibraryService {
   async scan(): Promise<number> {
     this.tracks.clear();
 
+    console.log(`Scanning folder: ${this.config.musicFolder}`);
+    console.log(`Supported formats: ${this.config.supportedFormats.join(', ')}`);
+
     if (!existsSync(this.config.musicFolder)) {
       console.warn(`Music folder not found: ${this.config.musicFolder}`);
       return 0;
@@ -56,7 +59,7 @@ export class LibraryService {
           // サブフォルダも再帰的にスキャン
           this.scanDirectory(fullPath);
         } else if (entry.isFile()) {
-          const ext = extname(entry.name).toLowerCase().slice(1);
+          const ext = extname(entry.name).toLowerCase(); // .mp3, .wav など
           if (this.config.supportedFormats.includes(ext)) {
             const track: Track = {
               id: this.generateId(fullPath),

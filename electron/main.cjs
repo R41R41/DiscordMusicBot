@@ -122,6 +122,39 @@ function startBackend() {
   });
 }
 
+// バックエンドの準備完了を待つ
+async function waitForBackend() {
+  const http = require('http');
+  const maxAttempts = 60; // 最大60回（約60秒）
+  
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const req = http.get('http://localhost:3001/api/system/status', (res) => {
+          if (res.statusCode === 200) {
+            resolve();
+          } else {
+            reject(new Error(`Status ${res.statusCode}`));
+          }
+          res.resume(); // データを消費してメモリリーク防止
+        });
+        req.on('error', reject);
+        req.setTimeout(2000, () => {
+          req.destroy();
+          reject(new Error('Timeout'));
+        });
+      });
+      writeLog(`Backend ready after ${i + 1} attempt(s)`);
+      return;
+    } catch (e) {
+      // 1秒待ってリトライ
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+  
+  writeLog('WARNING: Backend did not become ready in time, opening window anyway');
+}
+
 // メインウィンドウの作成
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -244,25 +277,72 @@ function createTray() {
   });
 }
 
-// アプリケーションの準備完了
-app.whenReady().then(() => {
-  // バックエンドを起動
-  startBackend();
-  
-  // 少し待ってからウィンドウを作成（バックエンド起動待ち）
-  // 開発モードでは既にバックエンドが起動しているので待機時間を短く
-  const waitTime = isDev ? 500 : 2000;
-  setTimeout(() => {
-    createWindow();
-    createTray();
-  }, waitTime);
+// シングルインスタンスロック
+const gotTheLock = app.requestSingleInstanceLock();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+if (!gotTheLock) {
+  // 既に別のインスタンスが起動している場合は終了
+  app.quit();
+} else {
+  // 2つ目のインスタンスが起動しようとした場合
+  app.on('second-instance', () => {
+    // 既存のウィンドウをフォーカス
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
-});
+
+  // アプリケーションの準備完了
+  app.whenReady().then(() => {
+    // ポート3001を使っている既存のプロセスを終了（Windowsのみ）
+    if (process.platform === 'win32' && !isDev) {
+      const { execSync } = require('child_process');
+      try {
+        // netstatでポート3001を使っているPIDを取得して終了
+        const result = execSync('netstat -ano | findstr ":3001"', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
+        const lines = result.split('\n');
+        const pids = new Set();
+        lines.forEach(line => {
+          const match = line.match(/LISTENING\s+(\d+)/);
+          if (match) pids.add(match[1]);
+        });
+        pids.forEach(pid => {
+          try {
+            execSync(`taskkill /pid ${pid} /t /f`, { stdio: 'ignore' });
+            writeLog(`Killed existing process on port 3001: ${pid}`);
+          } catch (e) { /* ignore */ }
+        });
+      } catch (e) {
+        // ポート3001を使っているプロセスがない場合は無視
+      }
+    }
+
+    // バックエンドを起動
+    startBackend();
+    
+    // バックエンドの準備完了を待ってからウィンドウを作成
+    if (isDev) {
+      // 開発モードでは既にバックエンドが起動しているはず
+      setTimeout(() => {
+        createWindow();
+        createTray();
+      }, 500);
+    } else {
+      waitForBackend().then(() => {
+        createWindow();
+        createTray();
+      });
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
 
 // 全ウィンドウが閉じられたとき
 app.on('window-all-closed', () => {
@@ -276,8 +356,33 @@ app.on('before-quit', () => {
   app.isQuitting = true;
   
   // バックエンドプロセスを終了
-  if (backendProcess) {
-    backendProcess.kill();
+  if (backendProcess && backendProcess.pid) {
+    writeLog(`Killing backend process: ${backendProcess.pid}`);
+    
+    // Windowsではtaskkillを使ってプロセスツリー全体を終了
+    if (process.platform === 'win32') {
+      const { execSync } = require('child_process');
+      try {
+        execSync(`taskkill /pid ${backendProcess.pid} /t /f`, { stdio: 'ignore' });
+      } catch (e) {
+        // 既に終了している場合は無視
+      }
+    } else {
+      backendProcess.kill('SIGKILL');
+    }
+  }
+});
+
+// アプリ終了時（quit後）
+app.on('will-quit', () => {
+  // 念のためもう一度バックエンドを終了
+  if (backendProcess && backendProcess.pid) {
+    if (process.platform === 'win32') {
+      const { execSync } = require('child_process');
+      try {
+        execSync(`taskkill /pid ${backendProcess.pid} /t /f`, { stdio: 'ignore' });
+      } catch (e) { /* ignore */ }
+    }
   }
 });
 

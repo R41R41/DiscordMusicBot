@@ -43,6 +43,11 @@ export const addTrackToPlaylist = (playlistName: string, trackId: string) =>
     method: 'POST',
     body: JSON.stringify({ trackId }),
   });
+export const addTracksToPlaylist = (playlistName: string, trackIds: string[]) =>
+  fetchJson<{ success: boolean }>(`/api/playlists/${encodeURIComponent(playlistName)}/tracks`, {
+    method: 'POST',
+    body: JSON.stringify({ trackIds }),
+  });
 export const removeTrackFromPlaylist = (playlistName: string, trackId: string) =>
   fetchJson<{ success: boolean }>(
     `/api/playlists/${encodeURIComponent(playlistName)}/tracks/${trackId}`,
@@ -73,6 +78,11 @@ export const queueTrack = (trackId: string) =>
     method: 'POST',
     body: JSON.stringify({ trackId }),
   });
+export const queueTracks = (trackIds: string[]) =>
+  fetchJson<{ success: boolean }>('/api/player/queue', {
+    method: 'POST',
+    body: JSON.stringify({ trackIds }),
+  });
 export const playPlaylist = (name: string, mode: 'replace' | 'append' = 'replace') =>
   fetchJson<{ success: boolean }>('/api/player/playlist', {
     method: 'POST',
@@ -97,6 +107,11 @@ export const playNextInQueue = (trackId: string) =>
   fetchJson<{ success: boolean }>('/api/player/queue/next', {
     method: 'POST',
     body: JSON.stringify({ trackId }),
+  });
+export const playNextInQueueBulk = (trackIds: string[]) =>
+  fetchJson<{ success: boolean }>('/api/player/queue/next', {
+    method: 'POST',
+    body: JSON.stringify({ trackIds }),
   });
 export const removeFromQueue = (index: number) =>
   fetchJson<{ success: boolean }>(`/api/player/queue/${index}`, { method: 'DELETE' });

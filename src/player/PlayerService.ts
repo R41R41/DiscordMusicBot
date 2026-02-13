@@ -292,9 +292,23 @@ export class PlayerService {
 
   // ===== 内部処理 =====
   private handleTrackEnd(): void {
+    // 接続が切れている場合は再生しない
+    if (this.adapter.getConnectionStatus() !== 'connected') {
+      this.current = null;
+      this.paused = false;
+      this.emitState();
+      return;
+    }
+
     if (this.loop === 'one' && this.current) {
       // 同じ曲をリピート
-      this.adapter.play(this.current.path, this.volume);
+      try {
+        this.adapter.play(this.current.path, this.volume);
+      } catch (error) {
+        console.error('Failed to repeat track:', error);
+        this.current = null;
+        this.paused = false;
+      }
       this.emitState();
       return;
     }
@@ -309,7 +323,13 @@ export class PlayerService {
       this.playNext();
     } else if (this.loop === 'all' && this.current) {
       // キューが空でもloop=allなら同じ曲を続ける
-      this.adapter.play(this.current.path, this.volume);
+      try {
+        this.adapter.play(this.current.path, this.volume);
+      } catch (error) {
+        console.error('Failed to loop track:', error);
+        this.current = null;
+        this.paused = false;
+      }
       this.emitState();
     } else {
       // 再生終了
@@ -327,8 +347,16 @@ export class PlayerService {
       return;
     }
 
+    // 接続が切れている場合は再生しない
+    if (this.adapter.getConnectionStatus() !== 'connected') {
+      this.current = null;
+      this.paused = false;
+      this.emitState();
+      return;
+    }
+
     const nextTrack = this.queue.shift()!;
-    
+
     // originalQueueからも削除
     const origIndex = this.originalQueue.findIndex((t) => t.id === nextTrack.id);
     if (origIndex !== -1) {
@@ -344,7 +372,13 @@ export class PlayerService {
 
     this.current = nextTrack;
     this.paused = false;
-    this.adapter.play(nextTrack.path, this.volume);
+    try {
+      this.adapter.play(nextTrack.path, this.volume);
+    } catch (error) {
+      console.error('Failed to play next track:', error);
+      this.current = null;
+      this.paused = false;
+    }
     this.emitState();
   }
 

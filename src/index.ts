@@ -27,7 +27,7 @@ async function main() {
   // サービス初期化
   const adapter = new DiscordAdapter();
   const library = new LibraryService(config);
-  const playlists = new PlaylistService();
+  const playlists = new PlaylistService(config.musicFolder, dataDir);
   const player = new PlayerService(adapter, library);
   const webApi = new WebApiService(
     config.webPort, 

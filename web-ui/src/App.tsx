@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import {
   Music,
   Play,
@@ -21,12 +21,21 @@ import {
   Save,
   AlertCircle,
   CheckCircle,
-} from 'lucide-react';
-import type { PlayerState, Track, Playlist, GuildInfo, ChannelInfo, LoopMode } from './types';
-import * as api from './api';
-import './index.css';
+  Sun,
+  Moon,
+} from "lucide-react";
+import type {
+  PlayerState,
+  Track,
+  Playlist,
+  GuildInfo,
+  ChannelInfo,
+  LoopMode,
+} from "./types";
+import * as api from "./api";
+import "./index.css";
 
-type TabType = 'library' | 'playlists' | 'queue' | 'settings';
+type TabType = "library" | "playlists" | "queue" | "settings";
 
 // コンテキストメニューの型
 interface ContextMenuState {
@@ -35,16 +44,16 @@ interface ContextMenuState {
   y: number;
   trackId: string;
   trackTitle: string;
-  source: 'library' | 'playlist' | 'queue';
+  source: "library" | "playlist" | "queue";
   index?: number; // キュー/プレイリスト内のインデックス
 }
 
 // 時間フォーマット（秒 -> mm:ss）
 const formatTime = (seconds: number): string => {
-  if (!seconds || seconds < 0) return '0:00';
+  if (!seconds || seconds < 0) return "0:00";
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 };
 
 function App() {
@@ -52,38 +61,67 @@ function App() {
   const [playerState, setPlayerState] = useState<PlayerState | null>(null);
   const [guilds, setGuilds] = useState<GuildInfo[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
-  const [selectedGuild, setSelectedGuild] = useState<string>('');
-  const [selectedChannel, setSelectedChannel] = useState<string>('');
+  const [selectedGuild, setSelectedGuild] = useState<string>("");
+  const [selectedChannel, setSelectedChannel] = useState<string>("");
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TabType>('library');
-  const [newPlaylistName, setNewPlaylistName] = useState('');
+  const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(
+    null,
+  );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<TabType>("library");
+  const [newPlaylistName, setNewPlaylistName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [displayPosition, setDisplayPosition] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [dragContext, setDragContext] = useState<'queue' | 'playlist' | null>(null);
+  const [dragContext, setDragContext] = useState<"queue" | "playlist" | null>(
+    null,
+  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
     y: 0,
-    trackId: '',
-    trackTitle: '',
-    source: 'library',
+    trackId: "",
+    trackTitle: "",
+    source: "library",
   });
+
+  // 複数選択
+  const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [lastClickedTrackId, setLastClickedTrackId] = useState<string | null>(
+    null,
+  );
+
+  // テーマ
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const saved = localStorage.getItem("theme");
+    return saved === "light" ? "light" : "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
 
   // 設定関連
   const [settings, setSettings] = useState<api.AppSettings | null>(null);
-  const [systemStatus, setSystemStatus] = useState<api.SystemStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<api.SystemStatus | null>(
+    null,
+  );
   const [settingsForm, setSettingsForm] = useState({
-    discordToken: '',
-    musicFolder: '',
+    discordToken: "",
+    musicFolder: "",
   });
   const [settingsSaved, setSettingsSaved] = useState(false);
-  const [settingsError, setSettingsError] = useState('');
+  const [settingsError, setSettingsError] = useState("");
 
   // WebSocket接続
   useEffect(() => {
@@ -108,7 +146,12 @@ function App() {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [playerState?.current?.id, playerState?.paused, playerState?.position, isSeeking]);
+  }, [
+    playerState?.current?.id,
+    playerState?.paused,
+    playerState?.position,
+    isSeeking,
+  ]);
 
   // playerStateが更新されたらdisplayPositionも更新（シーク中は無視）
   useEffect(() => {
@@ -117,10 +160,43 @@ function App() {
     }
   }, [playerState?.position, isSeeking]);
 
-  // 初期データ取得
+  // 初期データ取得（バックエンド起動待ちのリトライ付き）
   useEffect(() => {
-    loadInitialData();
+    let cancelled = false;
+    const attemptLoad = async () => {
+      const maxRetries = 30; // 最大30回（約60秒）
+      for (let i = 0; i < maxRetries; i++) {
+        if (cancelled) return;
+        try {
+          await loadInitialData();
+          console.log(`Initial data loaded (attempt ${i + 1})`);
+          return; // 成功したら終了
+        } catch (error) {
+          console.log(
+            `Waiting for backend... (attempt ${i + 1}/${maxRetries})`,
+          );
+          // 最初は短く、徐々に長くする（1s, 1s, 2s, 2s, 3s... 最大5s）
+          const delay = Math.min(1000 + Math.floor(i / 2) * 1000, 5000);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+      console.error("Failed to connect to backend after max retries");
+    };
+    attemptLoad();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  // タブ切り替え時に選択をクリア & 設定タブのステータス再取得
+  useEffect(() => {
+    setSelectedTrackIds(new Set());
+    setLastClickedTrackId(null);
+    if (activeTab === "settings") {
+      api.getSystemStatus().then(setSystemStatus).catch(console.error);
+      api.getSettings().then(setSettings).catch(console.error);
+    }
+  }, [activeTab]);
 
   // ギルド選択時にチャンネル取得
   useEffect(() => {
@@ -128,39 +204,64 @@ function App() {
       api.getChannels(selectedGuild).then(setChannels);
     } else {
       setChannels([]);
-      setSelectedChannel('');
+      setSelectedChannel("");
     }
   }, [selectedGuild]);
 
   const loadInitialData = async () => {
-    try {
-      const [state, guildList, trackList, playlistList, settingsData, statusData] = await Promise.all([
-        api.getPlayerState(),
-        api.getGuilds(),
-        api.getLibrary(),
-        api.getPlaylists(),
-        api.getSettings(),
-        api.getSystemStatus(),
-      ]);
-      setPlayerState(state);
-      setGuilds(guildList);
-      setTracks(trackList);
-      setPlaylists(playlistList);
-      setSettings(settingsData);
-      setSystemStatus(statusData);
-      setSettingsForm({
-        discordToken: '',
-        musicFolder: settingsData.currentMusicFolder || '',
-      });
+    const [
+      state,
+      guildList,
+      trackList,
+      playlistList,
+      settingsData,
+      statusData,
+    ] = await Promise.all([
+      api.getPlayerState(),
+      api.getGuilds(),
+      api.getLibrary(),
+      api.getPlaylists(),
+      api.getSettings(),
+      api.getSystemStatus(),
+    ]);
+    setPlayerState(state);
+    setGuilds(guildList);
+    setTracks(trackList);
+    setPlaylists(playlistList);
+    setSettings(settingsData);
+    setSystemStatus(statusData);
+    setSettingsForm({
+      discordToken: "",
+      musicFolder: settingsData.currentMusicFolder || "",
+    });
 
-      if (state.guildId) {
-        setSelectedGuild(state.guildId);
-        if (state.channelId) {
-          setSelectedChannel(state.channelId);
-        }
+    if (state.guildId) {
+      setSelectedGuild(state.guildId);
+      if (state.channelId) {
+        setSelectedChannel(state.channelId);
       }
+    }
+  };
+
+  // 全体再読み込み
+  const handleReloadAll = async () => {
+    setIsLoading(true);
+    try {
+      await loadInitialData();
     } catch (error) {
-      console.error('Failed to load initial data:', error);
+      console.error("Failed to reload data:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // サーバーリスト再読み込み
+  const handleReloadGuilds = async () => {
+    try {
+      const guildList = await api.getGuilds();
+      setGuilds(guildList);
+    } catch (error) {
+      console.error("Failed to reload guilds:", error);
     }
   };
 
@@ -170,7 +271,7 @@ function App() {
     try {
       await api.joinChannel(selectedGuild, selectedChannel);
     } catch (error) {
-      console.error('Failed to join:', error);
+      console.error("Failed to join:", error);
     }
   };
 
@@ -178,7 +279,7 @@ function App() {
     try {
       await api.leaveChannel();
     } catch (error) {
-      console.error('Failed to leave:', error);
+      console.error("Failed to leave:", error);
     }
   };
 
@@ -187,7 +288,7 @@ function App() {
     try {
       await api.playTrack(trackId);
     } catch (error) {
-      console.error('Failed to play:', error);
+      console.error("Failed to play:", error);
     }
   };
 
@@ -195,7 +296,7 @@ function App() {
     try {
       await api.queueTrack(trackId);
     } catch (error) {
-      console.error('Failed to queue:', error);
+      console.error("Failed to queue:", error);
     }
   };
 
@@ -203,7 +304,101 @@ function App() {
     try {
       await api.playNextInQueue(trackId);
     } catch (error) {
-      console.error('Failed to add to play next:', error);
+      console.error("Failed to add to play next:", error);
+    }
+  };
+
+  // ===== 複数選択 =====
+  // クリックによる選択ハンドラ（trackListは現在表示中のリスト）
+  const handleTrackClick = (
+    e: React.MouseEvent,
+    trackId: string,
+    trackList: { id: string }[],
+  ) => {
+    // ダブルクリック再生の妨げにならないよう、修飾キーなしのクリックは選択解除
+    if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      // 修飾キーなし: 選択中のものがあれば選択解除のみ（再生はdblclickで処理）
+      if (selectedTrackIds.size > 0) {
+        setSelectedTrackIds(new Set());
+        setLastClickedTrackId(null);
+      }
+      return;
+    }
+
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl/Cmd+Click: トグル選択
+      setSelectedTrackIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(trackId)) {
+          next.delete(trackId);
+        } else {
+          next.add(trackId);
+        }
+        return next;
+      });
+      setLastClickedTrackId(trackId);
+    } else if (e.shiftKey && lastClickedTrackId) {
+      // Shift+Click: 範囲選択
+      const ids = trackList.map((t) => t.id);
+      const startIdx = ids.indexOf(lastClickedTrackId);
+      const endIdx = ids.indexOf(trackId);
+      if (startIdx !== -1 && endIdx !== -1) {
+        const from = Math.min(startIdx, endIdx);
+        const to = Math.max(startIdx, endIdx);
+        const rangeIds = ids.slice(from, to + 1);
+        setSelectedTrackIds((prev) => {
+          const next = new Set(prev);
+          for (const id of rangeIds) {
+            next.add(id);
+          }
+          return next;
+        });
+      }
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedTrackIds(new Set());
+    setLastClickedTrackId(null);
+  };
+
+  // 一括操作
+  const handleBulkQueue = async () => {
+    const ids = Array.from(selectedTrackIds);
+    if (ids.length === 0) return;
+    try {
+      await api.queueTracks(ids);
+      clearSelection();
+    } catch (error) {
+      console.error("Failed to queue tracks:", error);
+    }
+  };
+
+  const handleBulkPlayNext = async () => {
+    const ids = Array.from(selectedTrackIds);
+    if (ids.length === 0) return;
+    try {
+      await api.playNextInQueueBulk(ids);
+      clearSelection();
+    } catch (error) {
+      console.error("Failed to play next:", error);
+    }
+  };
+
+  const handleBulkAddToPlaylist = async (playlistName: string) => {
+    const ids = Array.from(selectedTrackIds);
+    if (ids.length === 0) return;
+    try {
+      await api.addTracksToPlaylist(playlistName, ids);
+      if (selectedPlaylist?.name === playlistName) {
+        const fullPlaylist = await api.getPlaylist(playlistName);
+        setSelectedPlaylist(fullPlaylist);
+      }
+      const playlistList = await api.getPlaylists();
+      setPlaylists(playlistList);
+      clearSelection();
+    } catch (error) {
+      console.error("Failed to add to playlist:", error);
     }
   };
 
@@ -212,14 +407,36 @@ function App() {
     e: React.MouseEvent,
     trackId: string,
     trackTitle: string,
-    source: 'library' | 'playlist' | 'queue',
-    index?: number
+    source: "library" | "playlist" | "queue",
+    index?: number,
   ) => {
     e.preventDefault();
+
+    // 選択中のトラックの上で右クリックした場合、選択を維持
+    // 選択外で右クリックした場合、選択をクリアしてそのトラックだけを対象に
+    if (selectedTrackIds.size > 0 && !selectedTrackIds.has(trackId)) {
+      clearSelection();
+    }
+
+    // メニューの推定高さ（項目数に応じて調整）
+    const menuHeight = 300;
+    const menuWidth = 200;
+
+    // 画面下にはみ出す場合は上方向に表示
+    let y = e.clientY;
+    let x = e.clientX;
+
+    if (y + menuHeight > window.innerHeight) {
+      y = Math.max(10, window.innerHeight - menuHeight - 10);
+    }
+    if (x + menuWidth > window.innerWidth) {
+      x = Math.max(10, window.innerWidth - menuWidth - 10);
+    }
+
     setContextMenu({
       visible: true,
-      x: e.clientX,
-      y: e.clientY,
+      x,
+      y,
       trackId,
       trackTitle,
       source,
@@ -228,15 +445,15 @@ function App() {
   };
 
   const closeContextMenu = () => {
-    setContextMenu(prev => ({ ...prev, visible: false }));
+    setContextMenu((prev) => ({ ...prev, visible: false }));
   };
 
   // コンテキストメニューの外側クリックで閉じる
   useEffect(() => {
     const handleClick = () => closeContextMenu();
     if (contextMenu.visible) {
-      document.addEventListener('click', handleClick);
-      return () => document.removeEventListener('click', handleClick);
+      document.addEventListener("click", handleClick);
+      return () => document.removeEventListener("click", handleClick);
     }
   }, [contextMenu.visible]);
 
@@ -250,7 +467,7 @@ function App() {
     try {
       await api.removeFromQueue(index);
     } catch (error) {
-      console.error('Failed to remove from queue:', error);
+      console.error("Failed to remove from queue:", error);
     }
   };
 
@@ -260,7 +477,7 @@ function App() {
 
   const handleLoopChange = () => {
     if (!playerState) return;
-    const modes: LoopMode[] = ['off', 'one', 'all'];
+    const modes: LoopMode[] = ["off", "one", "all"];
     const currentIndex = modes.indexOf(playerState.loop);
     const nextMode = modes[(currentIndex + 1) % modes.length];
     api.updateSettings({ loop: nextMode });
@@ -281,13 +498,13 @@ function App() {
         setIsSeeking(false);
       }, 500);
     } catch (error) {
-      console.error('Failed to seek:', error);
+      console.error("Failed to seek:", error);
       setIsSeeking(false);
     }
   };
 
   // ===== ドラッグ&ドロップ =====
-  const handleDragStart = (index: number, context: 'queue' | 'playlist') => {
+  const handleDragStart = (index: number, context: "queue" | "playlist") => {
     setDraggedIndex(index);
     setDragContext(context);
   };
@@ -307,7 +524,11 @@ function App() {
 
   // ドラッグ中の並び替えプレビューを計算
   const getReorderedList = <T,>(list: T[]): T[] => {
-    if (draggedIndex === null || dragOverIndex === null || draggedIndex === dragOverIndex) {
+    if (
+      draggedIndex === null ||
+      dragOverIndex === null ||
+      draggedIndex === dragOverIndex
+    ) {
       return list;
     }
     const result = [...list];
@@ -326,7 +547,7 @@ function App() {
     try {
       await api.reorderQueue(fromIndex, toIndex);
     } catch (error) {
-      console.error('Failed to reorder queue:', error);
+      console.error("Failed to reorder queue:", error);
     }
     handleDragEnd();
   };
@@ -334,7 +555,13 @@ function App() {
   const handlePlaylistDrop = async () => {
     const fromIndex = draggedIndex;
     const toIndex = dragOverIndex;
-    if (!selectedPlaylist || !selectedPlaylist.tracks || fromIndex === null || toIndex === null || fromIndex === toIndex) {
+    if (
+      !selectedPlaylist ||
+      !selectedPlaylist.tracks ||
+      fromIndex === null ||
+      toIndex === null ||
+      fromIndex === toIndex
+    ) {
       handleDragEnd();
       return;
     }
@@ -348,7 +575,7 @@ function App() {
       const fullPlaylist = await api.getPlaylist(selectedPlaylist.name);
       setSelectedPlaylist(fullPlaylist);
     } catch (error) {
-      console.error('Failed to reorder playlist:', error);
+      console.error("Failed to reorder playlist:", error);
     }
     handleDragEnd();
   };
@@ -360,7 +587,7 @@ function App() {
       const results = await api.getLibrary(query);
       setTracks(results);
     } catch (error) {
-      console.error('Search failed:', error);
+      console.error("Search failed:", error);
     }
   }, []);
 
@@ -371,22 +598,32 @@ function App() {
       const trackList = await api.getLibrary(searchQuery);
       setTracks(trackList);
     } catch (error) {
-      console.error('Rescan failed:', error);
+      console.error("Rescan failed:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
   // ===== プレイリスト操作 =====
+  const [playlistError, setPlaylistError] = useState("");
+
   const handleCreatePlaylist = async () => {
     if (!newPlaylistName.trim()) return;
+    setPlaylistError("");
     try {
       await api.createPlaylist(newPlaylistName.trim());
-      setNewPlaylistName('');
+      setNewPlaylistName("");
       const playlistList = await api.getPlaylists();
       setPlaylists(playlistList);
-    } catch (error) {
-      console.error('Failed to create playlist:', error);
+    } catch (error: any) {
+      console.error("Failed to create playlist:", error);
+      const msg = error?.message || String(error);
+      if (msg.includes("already exists")) {
+        setPlaylistError("同名のプレイリストが既に存在します");
+      } else {
+        setPlaylistError("プレイリストの作成に失敗しました");
+      }
+      setTimeout(() => setPlaylistError(""), 3000);
     }
   };
 
@@ -399,7 +636,7 @@ function App() {
         setSelectedPlaylist(null);
       }
     } catch (error) {
-      console.error('Failed to delete playlist:', error);
+      console.error("Failed to delete playlist:", error);
     }
   };
 
@@ -408,15 +645,18 @@ function App() {
       const fullPlaylist = await api.getPlaylist(playlist.name);
       setSelectedPlaylist(fullPlaylist);
     } catch (error) {
-      console.error('Failed to load playlist:', error);
+      console.error("Failed to load playlist:", error);
     }
   };
 
-  const handlePlayPlaylist = async (name: string, mode: 'replace' | 'append' = 'replace') => {
+  const handlePlayPlaylist = async (
+    name: string,
+    mode: "replace" | "append" = "replace",
+  ) => {
     try {
       await api.playPlaylist(name, mode);
     } catch (error) {
-      console.error('Failed to play playlist:', error);
+      console.error("Failed to play playlist:", error);
     }
   };
 
@@ -427,8 +667,11 @@ function App() {
         const fullPlaylist = await api.getPlaylist(playlistName);
         setSelectedPlaylist(fullPlaylist);
       }
+      // プレイリスト一覧も更新（曲数の反映）
+      const playlistList = await api.getPlaylists();
+      setPlaylists(playlistList);
     } catch (error) {
-      console.error('Failed to add to playlist:', error);
+      console.error("Failed to add to playlist:", error);
     }
   };
 
@@ -442,16 +685,16 @@ function App() {
       const playlistList = await api.getPlaylists();
       setPlaylists(playlistList);
     } catch (error) {
-      console.error('Failed to remove from playlist:', error);
+      console.error("Failed to remove from playlist:", error);
     }
   };
 
   // ===== 設定操作 =====
   const handleSaveSettings = async () => {
     try {
-      setSettingsError('');
+      setSettingsError("");
       setSettingsSaved(false);
-      
+
       const updates: { discordToken?: string; musicFolder?: string } = {};
       if (settingsForm.discordToken) {
         updates.discordToken = settingsForm.discordToken;
@@ -463,20 +706,20 @@ function App() {
       const result = await api.saveSettings(updates);
       setSettings(result.config);
       setSettingsSaved(true);
-      setSettingsForm(prev => ({ ...prev, discordToken: '' }));
-      
+      setSettingsForm((prev) => ({ ...prev, discordToken: "" }));
+
       // ステータスを更新
       const statusData = await api.getSystemStatus();
       setSystemStatus(statusData);
 
       if (result.needsRestart) {
-        setSettingsError('設定を反映するにはアプリを再起動してください');
+        setSettingsError("設定を反映するにはアプリを再起動してください");
       }
 
       setTimeout(() => setSettingsSaved(false), 3000);
     } catch (error) {
-      console.error('Failed to save settings:', error);
-      setSettingsError('設定の保存に失敗しました');
+      console.error("Failed to save settings:", error);
+      setSettingsError("設定の保存に失敗しました");
     }
   };
 
@@ -484,13 +727,13 @@ function App() {
     try {
       await api.openMusicFolder();
     } catch (error) {
-      console.error('Failed to open folder:', error);
+      console.error("Failed to open folder:", error);
     }
   };
 
   // ===== レンダリング =====
   const getLoopIcon = () => {
-    if (playerState?.loop === 'one') return <Repeat1 size={18} />;
+    if (playerState?.loop === "one") return <Repeat1 size={18} />;
     return <Repeat size={18} />;
   };
 
@@ -507,6 +750,23 @@ function App() {
             <span className="version-badge">v{systemStatus.version}</span>
           )}
         </h1>
+        <div className="header-actions">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "ライトモードに切り替え" : "ダークモードに切り替え"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={handleReloadAll}
+            disabled={isLoading}
+            title="全体を再読み込み"
+          >
+            <RefreshCw size={18} className={isLoading ? "spin" : ""} />
+          </button>
+        </div>
       </header>
 
       <main className="main">
@@ -515,36 +775,39 @@ function App() {
           {/* Tabs */}
           <div className="tabs">
             <button
-              className={`tab ${activeTab === 'library' ? 'active' : ''}`}
-              onClick={() => setActiveTab('library')}
+              className={`tab ${activeTab === "library" ? "active" : ""}`}
+              onClick={() => setActiveTab("library")}
             >
               <Library size={16} /> ライブラリ
             </button>
             <button
-              className={`tab ${activeTab === 'playlists' ? 'active' : ''}`}
-              onClick={() => setActiveTab('playlists')}
+              className={`tab ${activeTab === "playlists" ? "active" : ""}`}
+              onClick={() => setActiveTab("playlists")}
             >
               <List size={16} /> プレイリスト
             </button>
             <button
-              className={`tab ${activeTab === 'queue' ? 'active' : ''}`}
-              onClick={() => setActiveTab('queue')}
+              className={`tab ${activeTab === "queue" ? "active" : ""}`}
+              onClick={() => setActiveTab("queue")}
             >
               <ListPlus size={16} /> キュー
               {playerState && playerState.queue.length > 0 && (
-                <span className="queue-count"> ({playerState.queue.length})</span>
+                <span className="queue-count">
+                  {" "}
+                  ({playerState.queue.length})
+                </span>
               )}
             </button>
             <button
-              className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('settings')}
+              className={`tab ${activeTab === "settings" ? "active" : ""}`}
+              onClick={() => setActiveTab("settings")}
             >
               <Settings size={16} /> 設定
             </button>
           </div>
 
           {/* Library Tab */}
-          {activeTab === 'library' && (
+          {activeTab === "library" && (
             <>
               <div className="search-bar">
                 <div className="input-group">
@@ -555,11 +818,25 @@ function App() {
                     value={searchQuery}
                     onChange={(e) => handleSearch(e.target.value)}
                   />
-                  <button className="btn btn-secondary" onClick={handleRescan} disabled={isLoading}>
-                    <RefreshCw size={16} className={isLoading ? 'spin' : ''} />
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleRescan}
+                    disabled={isLoading}
+                  >
+                    <RefreshCw size={16} className={isLoading ? "spin" : ""} />
                   </button>
                 </div>
               </div>
+              {selectedTrackIds.size > 0 && activeTab === "library" && (
+                <div className="selection-bar">
+                  <span>{selectedTrackIds.size} 曲を選択中</span>
+                  <div className="selection-actions">
+                    <button onClick={handleBulkPlayNext}>次に再生</button>
+                    <button onClick={handleBulkQueue}>キューに追加</button>
+                    <button onClick={clearSelection}>選択解除</button>
+                  </div>
+                </div>
+              )}
               <div className="track-list">
                 {filteredTracks.length === 0 ? (
                   <div className="empty-state">
@@ -570,9 +847,14 @@ function App() {
                   filteredTracks.map((track) => (
                     <div
                       key={track.id}
-                      className={`track-item ${playerState?.current?.id === track.id ? 'playing' : ''}`}
+                      className={`track-item ${playerState?.current?.id === track.id ? "playing" : ""} ${selectedTrackIds.has(track.id) ? "selected" : ""}`}
+                      onClick={(e) =>
+                        handleTrackClick(e, track.id, filteredTracks)
+                      }
                       onDoubleClick={() => handlePlay(track.id)}
-                      onContextMenu={(e) => handleContextMenu(e, track.id, track.title, 'library')}
+                      onContextMenu={(e) =>
+                        handleContextMenu(e, track.id, track.title, "library")
+                      }
                     >
                       <div className="track-info">
                         <div className="track-title">{track.title}</div>
@@ -585,7 +867,7 @@ function App() {
           )}
 
           {/* Playlists Tab */}
-          {activeTab === 'playlists' && (
+          {activeTab === "playlists" && (
             <>
               <div className="search-bar">
                 <div className="input-group">
@@ -595,12 +877,28 @@ function App() {
                     placeholder="新しいプレイリスト名..."
                     value={newPlaylistName}
                     onChange={(e) => setNewPlaylistName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCreatePlaylist()}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && handleCreatePlaylist()
+                    }
                   />
-                  <button className="btn btn-primary" onClick={handleCreatePlaylist}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleCreatePlaylist}
+                  >
                     <Plus size={16} />
                   </button>
                 </div>
+                {playlistError && (
+                  <div
+                    style={{
+                      color: "var(--error)",
+                      fontSize: "0.8rem",
+                      marginTop: "var(--space-xs)",
+                    }}
+                  >
+                    {playlistError}
+                  </div>
+                )}
               </div>
               <div className="playlist-list">
                 {playlists.length === 0 ? (
@@ -612,12 +910,14 @@ function App() {
                   playlists.map((playlist) => (
                     <div
                       key={playlist.name}
-                      className={`playlist-item ${selectedPlaylist?.name === playlist.name ? 'selected' : ''}`}
+                      className={`playlist-item ${selectedPlaylist?.name === playlist.name ? "selected" : ""}`}
                       onClick={() => handleSelectPlaylist(playlist)}
                     >
                       <div>
                         <div className="playlist-name">{playlist.name}</div>
-                        <div className="playlist-count">{playlist.trackIds.length} 曲</div>
+                        <div className="playlist-count">
+                          {playlist.trackIds.length} 曲
+                        </div>
                       </div>
                       <div className="track-actions" style={{ opacity: 1 }}>
                         <button
@@ -646,27 +946,75 @@ function App() {
                 )}
               </div>
               {selectedPlaylist && selectedPlaylist.tracks && (
-                <div className="card-body" style={{ borderTop: '1px solid var(--border)' }}>
-                  <h3 style={{ marginBottom: 'var(--space-md)', fontSize: '0.875rem', flexShrink: 0 }}>
+                <div
+                  className="card-body"
+                  style={{ borderTop: "1px solid var(--border)" }}
+                >
+                  <h3
+                    style={{
+                      marginBottom: "var(--space-md)",
+                      fontSize: "0.875rem",
+                      flexShrink: 0,
+                    }}
+                  >
                     {selectedPlaylist.name} の曲
                   </h3>
+                  {selectedTrackIds.size > 0 && activeTab === "playlists" && (
+                    <div className="selection-bar">
+                      <span>{selectedTrackIds.size} 曲を選択中</span>
+                      <div className="selection-actions">
+                        <button onClick={handleBulkPlayNext}>次に再生</button>
+                        <button onClick={handleBulkQueue}>キューに追加</button>
+                        <button onClick={clearSelection}>選択解除</button>
+                      </div>
+                    </div>
+                  )}
                   <div className="track-list">
-                    {(dragContext === 'playlist' ? getReorderedList(selectedPlaylist.tracks) : selectedPlaylist.tracks).map((track, index) => {
-                      const isDragged = dragContext === 'playlist' && draggedIndex !== null && dragOverIndex !== null && index === dragOverIndex;
-                      
+                    {(dragContext === "playlist"
+                      ? getReorderedList(selectedPlaylist.tracks)
+                      : selectedPlaylist.tracks
+                    ).map((track, index) => {
+                      const isDragged =
+                        dragContext === "playlist" &&
+                        draggedIndex !== null &&
+                        dragOverIndex !== null &&
+                        index === dragOverIndex;
+
                       return (
                         <div
                           key={track.id}
-                          className={`track-item ${isDragged ? 'dragging' : ''} ${playerState?.current?.id === track.id ? 'playing' : ''}`}
+                          className={`track-item ${isDragged ? "dragging" : ""} ${playerState?.current?.id === track.id ? "playing" : ""} ${selectedTrackIds.has(track.id) ? "selected" : ""}`}
                           draggable
-                          onDragStart={() => handleDragStart(index, 'playlist')}
+                          onDragStart={() => handleDragStart(index, "playlist")}
                           onDragOver={(e) => handleDragOver(e, index)}
                           onDrop={handlePlaylistDrop}
                           onDragEnd={handleDragEnd}
+                          onClick={(e) =>
+                            handleTrackClick(
+                              e,
+                              track.id,
+                              selectedPlaylist.tracks!,
+                            )
+                          }
                           onDoubleClick={() => handlePlay(track.id)}
-                          onContextMenu={(e) => handleContextMenu(e, track.id, track.title, 'playlist', index)}
+                          onContextMenu={(e) =>
+                            handleContextMenu(
+                              e,
+                              track.id,
+                              track.title,
+                              "playlist",
+                              index,
+                            )
+                          }
                         >
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', width: '24px', flexShrink: 0 }}>
+                          <span
+                            style={{
+                              color: "var(--text-muted)",
+                              fontSize: "0.75rem",
+                              width: "24px",
+                              flexShrink: 0,
+                            }}
+                          >
                             {index + 1}
                           </span>
                           <div className="track-info">
@@ -682,16 +1030,29 @@ function App() {
           )}
 
           {/* Queue Tab */}
-          {activeTab === 'queue' && (
+          {activeTab === "queue" && (
             <>
               <div className="card-header queue-header">
                 <span>再生キュー</span>
                 {playerState && playerState.queue.length > 0 && (
-                  <button className="btn btn-secondary" onClick={handleClearQueue}>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleClearQueue}
+                  >
                     クリア
                   </button>
                 )}
               </div>
+              {selectedTrackIds.size > 0 && activeTab === "queue" && (
+                <div className="selection-bar">
+                  <span>{selectedTrackIds.size} 曲を選択中</span>
+                  <div className="selection-actions">
+                    <button onClick={handleBulkPlayNext}>次に再生</button>
+                    <button onClick={handleBulkQueue}>キューに追加</button>
+                    <button onClick={clearSelection}>選択解除</button>
+                  </div>
+                </div>
+              )}
               <div className="track-list">
                 {!playerState || playerState.queue.length === 0 ? (
                   <div className="empty-state">
@@ -699,29 +1060,58 @@ function App() {
                     <p>キューは空です</p>
                   </div>
                 ) : (
-                  (dragContext === 'queue' ? getReorderedList(playerState.queue) : playerState.queue).map((track, index) => {
+                  (dragContext === "queue"
+                    ? getReorderedList(playerState.queue)
+                    : playerState.queue
+                  ).map((track, index) => {
                     // 元のインデックスを計算（ドラッグ操作用）
-                    const originalIndex = dragContext === 'queue' && draggedIndex !== null && dragOverIndex !== null
-                      ? (index === dragOverIndex ? draggedIndex 
-                         : index >= Math.min(draggedIndex, dragOverIndex) && index <= Math.max(draggedIndex, dragOverIndex)
-                           ? (draggedIndex < dragOverIndex ? index - 1 : index + 1)
-                           : index)
-                      : index;
-                    const isDragged = dragContext === 'queue' && originalIndex === draggedIndex;
-                    
+                    const originalIndex =
+                      dragContext === "queue" &&
+                      draggedIndex !== null &&
+                      dragOverIndex !== null
+                        ? index === dragOverIndex
+                          ? draggedIndex
+                          : index >= Math.min(draggedIndex, dragOverIndex) &&
+                              index <= Math.max(draggedIndex, dragOverIndex)
+                            ? draggedIndex < dragOverIndex
+                              ? index - 1
+                              : index + 1
+                            : index
+                        : index;
+                    const isDragged =
+                      dragContext === "queue" && originalIndex === draggedIndex;
+
                     return (
                       <div
                         key={`${track.id}-${index}`}
-                        className={`track-item ${isDragged ? 'dragging' : ''}`}
+                        className={`track-item ${isDragged ? "dragging" : ""} ${selectedTrackIds.has(track.id) ? "selected" : ""}`}
                         draggable
-                        onDragStart={() => handleDragStart(index, 'queue')}
+                        onDragStart={() => handleDragStart(index, "queue")}
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDrop={handleQueueDrop}
                         onDragEnd={handleDragEnd}
+                        onClick={(e) =>
+                          handleTrackClick(e, track.id, playerState.queue)
+                        }
                         onDoubleClick={() => handlePlay(track.id)}
-                        onContextMenu={(e) => handleContextMenu(e, track.id, track.title, 'queue', originalIndex)}
+                        onContextMenu={(e) =>
+                          handleContextMenu(
+                            e,
+                            track.id,
+                            track.title,
+                            "queue",
+                            originalIndex,
+                          )
+                        }
                       >
-                        <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', width: '24px', flexShrink: 0 }}>
+                        <span
+                          style={{
+                            color: "var(--text-muted)",
+                            fontSize: "0.75rem",
+                            width: "24px",
+                            flexShrink: 0,
+                          }}
+                        >
                           {index + 1}
                         </span>
                         <div className="track-info">
@@ -736,7 +1126,7 @@ function App() {
           )}
 
           {/* Settings Tab */}
-          {activeTab === 'settings' && (
+          {activeTab === "settings" && (
             <div className="settings-panel">
               <div className="card-body">
                 {/* ステータス */}
@@ -745,17 +1135,25 @@ function App() {
                   <div className="status-grid">
                     <div className="status-item">
                       <span className="status-label">Discord接続</span>
-                      <span className={`status-value ${systemStatus?.discordConnected ? 'success' : 'error'}`}>
+                      <span
+                        className={`status-value ${systemStatus?.discordConnected ? "success" : "error"}`}
+                      >
                         {systemStatus?.discordConnected ? (
-                          <><CheckCircle size={14} /> 接続中</>
+                          <>
+                            <CheckCircle size={14} /> 接続中
+                          </>
                         ) : (
-                          <><AlertCircle size={14} /> 未接続</>
+                          <>
+                            <AlertCircle size={14} /> 未接続
+                          </>
                         )}
                       </span>
                     </div>
                     <div className="status-item">
                       <span className="status-label">曲数</span>
-                      <span className="status-value">{systemStatus?.trackCount || 0} 曲</span>
+                      <span className="status-value">
+                        {systemStatus?.trackCount || 0} 曲
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -764,9 +1162,9 @@ function App() {
                 <div className="settings-section">
                   <h3 className="settings-title">Discord Bot Token</h3>
                   <p className="settings-description">
-                    {settings?.hasToken 
+                    {settings?.hasToken
                       ? `設定済み: ${settings.discordToken}`
-                      : 'トークンが設定されていません'}
+                      : "トークンが設定されていません"}
                   </p>
                   <div className="input-group">
                     <input
@@ -774,7 +1172,12 @@ function App() {
                       className="input"
                       placeholder="新しいトークンを入力..."
                       value={settingsForm.discordToken}
-                      onChange={(e) => setSettingsForm(prev => ({ ...prev, discordToken: e.target.value }))}
+                      onChange={(e) =>
+                        setSettingsForm((prev) => ({
+                          ...prev,
+                          discordToken: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                 </div>
@@ -783,21 +1186,35 @@ function App() {
                 <div className="settings-section">
                   <h3 className="settings-title">音楽フォルダ</h3>
                   <p className="settings-description">
-                    現在のフォルダ: {settings?.currentMusicFolder || '未設定'}
+                    現在のフォルダ: {settings?.currentMusicFolder || "未設定"}
                   </p>
                   <div className="input-group">
-                    <button className="btn btn-secondary" onClick={handleOpenMusicFolder}>
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleOpenMusicFolder}
+                    >
                       <FolderOpen size={16} /> フォルダを開く
                     </button>
-                    <button className="btn btn-secondary" onClick={handleRescan} disabled={isLoading}>
-                      <RefreshCw size={16} className={isLoading ? 'spin' : ''} /> 再スキャン
+                    <button
+                      className="btn btn-secondary"
+                      onClick={handleRescan}
+                      disabled={isLoading}
+                    >
+                      <RefreshCw
+                        size={16}
+                        className={isLoading ? "spin" : ""}
+                      />{" "}
+                      再スキャン
                     </button>
                   </div>
                 </div>
 
                 {/* 保存ボタン */}
                 <div className="settings-section">
-                  <button className="btn btn-primary" onClick={handleSaveSettings}>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleSaveSettings}
+                  >
                     <Save size={16} /> 設定を保存
                   </button>
                   {settingsSaved && (
@@ -816,10 +1233,17 @@ function App() {
                 <div className="settings-section">
                   <h3 className="settings-title">デバッグ情報</h3>
                   <div className="debug-info">
-                    <p>データディレクトリ: <code>{systemStatus?.dataDir || '不明'}</code></p>
-                    <p>音楽フォルダ: <code>{systemStatus?.musicFolder || '不明'}</code></p>
+                    <p>
+                      データディレクトリ:{" "}
+                      <code>{systemStatus?.dataDir || "不明"}</code>
+                    </p>
+                    <p>
+                      音楽フォルダ:{" "}
+                      <code>{systemStatus?.musicFolder || "不明"}</code>
+                    </p>
                     <p className="debug-hint">
-                      ※ 問題が発生した場合は、タスクトレイのアイコンを右クリックして「ログを開く」で詳細を確認できます。
+                      ※
+                      問題が発生した場合は、タスクトレイのアイコンを右クリックして「ログを開く」で詳細を確認できます。
                     </p>
                   </div>
                 </div>
@@ -835,29 +1259,39 @@ function App() {
             <div className="connection-panel">
               <div className="connection-status">
                 <span
-                  className={`status-dot ${playerState?.connection || 'disconnected'}`}
+                  className={`status-dot ${playerState?.connection || "disconnected"}`}
                 />
                 <span>
-                  {playerState?.connection === 'connected'
-                    ? '接続中'
-                    : playerState?.connection === 'connecting'
-                    ? '接続中...'
-                    : '未接続'}
+                  {playerState?.connection === "connected"
+                    ? "接続中"
+                    : playerState?.connection === "connecting"
+                      ? "接続中..."
+                      : "未接続"}
                 </span>
               </div>
               <div className="connection-selects">
-                <select
-                  className="select"
-                  value={selectedGuild}
-                  onChange={(e) => setSelectedGuild(e.target.value)}
-                >
-                  <option value="">サーバーを選択</option>
-                  {guilds.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="select-with-reload">
+                  <select
+                    className="select"
+                    value={selectedGuild}
+                    onChange={(e) => setSelectedGuild(e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">サーバーを選択</option>
+                    {guilds.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={handleReloadGuilds}
+                    title="サーバーリストを再読み込み"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </div>
                 <select
                   className="select"
                   value={selectedChannel}
@@ -873,8 +1307,12 @@ function App() {
                 </select>
               </div>
               <div className="input-group">
-                {playerState?.connection === 'connected' ? (
-                  <button className="btn btn-secondary" onClick={handleLeave} style={{ flex: 1 }}>
+                {playerState?.connection === "connected" ? (
+                  <button
+                    className="btn btn-secondary"
+                    onClick={handleLeave}
+                    style={{ flex: 1 }}
+                  >
                     切断
                   </button>
                 ) : (
@@ -895,12 +1333,16 @@ function App() {
               {playerState?.current ? (
                 <>
                   <div className="now-playing-status">
-                    {playerState.paused ? '一時停止中' : '再生中'}
+                    {playerState.paused ? "一時停止中" : "再生中"}
                   </div>
-                  <div className="now-playing-title">{playerState.current.title}</div>
+                  <div className="now-playing-title">
+                    {playerState.current.title}
+                  </div>
                   {/* Progress Bar */}
                   <div className="progress-container">
-                    <span className="progress-time">{formatTime(displayPosition)}</span>
+                    <span className="progress-time">
+                      {formatTime(displayPosition)}
+                    </span>
                     <div
                       className="progress-bar"
                       onClick={(e) => {
@@ -916,27 +1358,40 @@ function App() {
                       <div
                         className="progress-fill"
                         style={{
-                          width: `${playerState.current.duration > 0
-                            ? (displayPosition / playerState.current.duration) * 100
-                            : 0}%`
+                          width: `${
+                            playerState.current.duration > 0
+                              ? (displayPosition /
+                                  playerState.current.duration) *
+                                100
+                              : 0
+                          }%`,
                         }}
                       />
                       <div
                         className="progress-thumb"
                         style={{
-                          left: `${playerState.current.duration > 0
-                            ? (displayPosition / playerState.current.duration) * 100
-                            : 0}%`
+                          left: `${
+                            playerState.current.duration > 0
+                              ? (displayPosition /
+                                  playerState.current.duration) *
+                                100
+                              : 0
+                          }%`,
                         }}
                       />
                     </div>
-                    <span className="progress-time">{formatTime(playerState.current.duration)}</span>
+                    <span className="progress-time">
+                      {formatTime(playerState.current.duration)}
+                    </span>
                   </div>
                 </>
               ) : (
                 <>
                   <div className="now-playing-status">停止中</div>
-                  <div className="now-playing-title" style={{ color: 'var(--text-muted)' }}>
+                  <div
+                    className="now-playing-title"
+                    style={{ color: "var(--text-muted)" }}
+                  >
                     曲を選択してください
                   </div>
                 </>
@@ -946,7 +1401,7 @@ function App() {
             {/* Controls */}
             <div className="player-controls">
               <button
-                className={`btn btn-icon shuffle-btn ${playerState?.shuffle ? 'active' : ''}`}
+                className={`btn btn-icon shuffle-btn ${playerState?.shuffle ? "active" : ""}`}
                 onClick={handleShuffleToggle}
                 title="シャッフル"
               >
@@ -963,7 +1418,7 @@ function App() {
                 className="btn btn-icon btn-primary large"
                 onClick={playerState?.paused ? handleResume : handlePause}
                 disabled={!playerState?.current}
-                title={playerState?.paused ? '再生' : '一時停止'}
+                title={playerState?.paused ? "再生" : "一時停止"}
               >
                 {playerState?.paused ? <Play size={24} /> : <Pause size={24} />}
               </button>
@@ -975,9 +1430,9 @@ function App() {
                 <SkipForward size={20} />
               </button>
               <button
-                className={`btn btn-icon loop-btn ${playerState?.loop || 'off'}`}
+                className={`btn btn-icon loop-btn ${playerState?.loop || "off"}`}
                 onClick={handleLoopChange}
-                title={`ループ: ${playerState?.loop || 'off'}`}
+                title={`ループ: ${playerState?.loop || "off"}`}
               >
                 {getLoopIcon()}
               </button>
@@ -998,7 +1453,13 @@ function App() {
                   value={playerState?.volume || 50}
                   onChange={(e) => handleVolumeChange(Number(e.target.value))}
                 />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', width: '32px' }}>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                    width: "32px",
+                  }}
+                >
                   {playerState?.volume || 50}%
                 </span>
               </div>
@@ -1008,77 +1469,123 @@ function App() {
       </main>
 
       {/* コンテキストメニュー */}
-      {contextMenu.visible && (
-        <div
-          className="context-menu"
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000,
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="context-menu-header">{contextMenu.trackTitle}</div>
-          <button
-            className="context-menu-item"
-            onClick={() => { handlePlay(contextMenu.trackId); closeContextMenu(); }}
+      {contextMenu.visible && (() => {
+        const isBulk = selectedTrackIds.size > 1 && selectedTrackIds.has(contextMenu.trackId);
+        const bulkIds = Array.from(selectedTrackIds);
+
+        return (
+          <div
+            className="context-menu"
+            style={{
+              position: "fixed",
+              top: contextMenu.y,
+              left: contextMenu.x,
+              zIndex: 1000,
+            }}
+            onClick={(e) => e.stopPropagation()}
           >
-            再生
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { handlePlayNext(contextMenu.trackId); closeContextMenu(); }}
-          >
-            次に再生
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => { handleQueue(contextMenu.trackId); closeContextMenu(); }}
-          >
-            キューに追加
-          </button>
-          {playlists.length > 0 && (
-            <>
-              <div className="context-menu-divider" />
-              <div className="context-menu-submenu">
-                <span className="context-menu-label">プレイリストに追加</span>
-                {playlists.map((pl) => (
+            <div className="context-menu-header">
+              {isBulk
+                ? `${selectedTrackIds.size} 曲を選択中`
+                : contextMenu.trackTitle}
+            </div>
+            {!isBulk && (
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  handlePlay(contextMenu.trackId);
+                  closeContextMenu();
+                }}
+              >
+                再生
+              </button>
+            )}
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                if (isBulk) {
+                  handleBulkPlayNext();
+                } else {
+                  handlePlayNext(contextMenu.trackId);
+                }
+                closeContextMenu();
+              }}
+            >
+              次に再生{isBulk ? ` (${bulkIds.length}曲)` : ""}
+            </button>
+            <button
+              className="context-menu-item"
+              onClick={() => {
+                if (isBulk) {
+                  handleBulkQueue();
+                } else {
+                  handleQueue(contextMenu.trackId);
+                }
+                closeContextMenu();
+              }}
+            >
+              キューに追加{isBulk ? ` (${bulkIds.length}曲)` : ""}
+            </button>
+            {playlists.length > 0 && (
+              <>
+                <div className="context-menu-divider" />
+                <div className="context-menu-submenu">
+                  <span className="context-menu-label">プレイリストに追加</span>
+                  {playlists.map((pl) => (
+                    <button
+                      key={pl.name}
+                      className="context-menu-item context-menu-subitem"
+                      onClick={() => {
+                        if (isBulk) {
+                          handleBulkAddToPlaylist(pl.name);
+                        } else {
+                          handleAddToPlaylist(pl.name, contextMenu.trackId);
+                        }
+                        closeContextMenu();
+                      }}
+                    >
+                      {pl.name}
+                      {isBulk ? ` (${bulkIds.length}曲)` : ""}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+            {!isBulk &&
+              contextMenu.source === "playlist" &&
+              contextMenu.index !== undefined && (
+                <>
+                  <div className="context-menu-divider" />
                   <button
-                    key={pl.name}
-                    className="context-menu-item context-menu-subitem"
-                    onClick={() => { handleAddToPlaylist(pl.name, contextMenu.trackId); closeContextMenu(); }}
+                    className="context-menu-item context-menu-danger"
+                    onClick={() => {
+                      handleRemoveFromPlaylist(contextMenu.trackId);
+                      closeContextMenu();
+                    }}
                   >
-                    {pl.name}
+                    プレイリストから削除
                   </button>
-                ))}
-              </div>
-            </>
-          )}
-          {contextMenu.source === 'playlist' && contextMenu.index !== undefined && (
-            <>
-              <div className="context-menu-divider" />
-              <button
-                className="context-menu-item context-menu-danger"
-                onClick={() => { handleRemoveFromPlaylist(contextMenu.trackId); closeContextMenu(); }}
-              >
-                プレイリストから削除
-              </button>
-            </>
-          )}
-          {contextMenu.source === 'queue' && contextMenu.index !== undefined && (
-            <>
-              <div className="context-menu-divider" />
-              <button
-                className="context-menu-item context-menu-danger"
-                onClick={() => { handleRemoveFromQueue(contextMenu.index!); closeContextMenu(); }}
-              >
-                キューから削除
-              </button>
-            </>
-          )}
-        </div>
-      )}
+                </>
+              )}
+            {!isBulk &&
+              contextMenu.source === "queue" &&
+              contextMenu.index !== undefined && (
+                <>
+                  <div className="context-menu-divider" />
+                  <button
+                    className="context-menu-item context-menu-danger"
+                    onClick={() => {
+                      handleRemoveFromQueue(contextMenu.index!);
+                      closeContextMenu();
+                    }}
+                  >
+                    キューから削除
+                  </button>
+                </>
+              )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
