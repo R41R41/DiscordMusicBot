@@ -1,6 +1,6 @@
 {
   "name": "discord-music-bot",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "BGM共有 Discord Bot + Web UI",
   "main": "electron/main.cjs",
   "type": "module",
