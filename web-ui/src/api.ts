@@ -3,6 +3,9 @@ import type { Track, Playlist, PlayerState, GuildInfo, ChannelInfo, LoopMode } f
 
 const API_BASE = 'http://localhost:3001';
 
+export const getTrackStreamUrl = (trackId: string) =>
+  `${API_BASE}/api/library/tracks/${trackId}/stream`;
+
 // ===== HTTP API =====
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, {
@@ -53,6 +56,21 @@ export const removeTrackFromPlaylist = (playlistName: string, trackId: string) =
     `/api/playlists/${encodeURIComponent(playlistName)}/tracks/${trackId}`,
     { method: 'DELETE' }
   );
+export const reorderPlaylists = (names: string[]) =>
+  fetchJson<{ success: boolean }>('/api/playlists/reorder', {
+    method: 'PUT',
+    body: JSON.stringify({ names }),
+  });
+export const renamePlaylist = (oldName: string, newName: string) =>
+  fetchJson<{ success: boolean; playlist: Playlist }>(`/api/playlists/${encodeURIComponent(oldName)}/rename`, {
+    method: 'PUT',
+    body: JSON.stringify({ newName }),
+  });
+export const renameTrack = (trackId: string, newTitle: string) =>
+  fetchJson<{ success: boolean; track: Track; oldId: string }>(`/api/library/tracks/${trackId}/rename`, {
+    method: 'PUT',
+    body: JSON.stringify({ newTitle }),
+  });
 export const reorderPlaylist = (playlistName: string, trackIds: string[]) =>
   fetchJson<{ success: boolean }>(`/api/playlists/${encodeURIComponent(playlistName)}/order`, {
     method: 'PUT',

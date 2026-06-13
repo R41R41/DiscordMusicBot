@@ -79,6 +79,75 @@ export class WebApiService {
       res.json(this.library.search(query));
     });
 
+    // 音声ストリーミング（ローカル再生用）Range対応
+    this.app.get('/api/library/tracks/:id/stream', (req, res) => {
+      try {
+        const { id } = req.params;
+        const track = this.library.getTrack(id);
+        if (!track) {
+          return res.status(404).json({ error: 'Track not found' });
+        }
+        if (!fs.existsSync(track.path)) {
+          return res.status(404).json({ error: 'File not found' });
+        }
+
+        const stat = fs.statSync(track.path);
+        const fileSize = stat.size;
+        const ext = path.extname(track.path).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          '.mp3': 'audio/mpeg',
+          '.wav': 'audio/wav',
+          '.flac': 'audio/flac',
+          '.ogg': 'audio/ogg',
+          '.m4a': 'audio/mp4',
+        };
+        const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+        const range = req.headers.range;
+        if (range) {
+          const parts = range.replace(/bytes=/, '').split('-');
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          const chunkSize = end - start + 1;
+          res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': chunkSize,
+            'Content-Type': contentType,
+          });
+          fs.createReadStream(track.path, { start, end }).pipe(res);
+        } else {
+          res.writeHead(200, {
+            'Content-Length': fileSize,
+            'Content-Type': contentType,
+            'Accept-Ranges': 'bytes',
+          });
+          fs.createReadStream(track.path).pipe(res);
+        }
+      } catch (error) {
+        res.status(500).json({ error: String(error) });
+      }
+    });
+
+    this.app.put('/api/library/tracks/:id/rename', (req, res) => {
+      try {
+        const { id } = req.params;
+        const { newTitle } = req.body;
+        if (!newTitle || typeof newTitle !== 'string' || !newTitle.trim()) {
+          return res.status(400).json({ error: 'New title is required' });
+        }
+        const { track, oldId } = this.library.renameTrack(id, newTitle);
+        // プレイリスト内のトラックIDも更新
+        this.playlists.replaceTrackId(oldId, track.id);
+        this.io.emit('library_updated', { count: this.library.getTrackCount() });
+        res.json({ success: true, track, oldId });
+      } catch (error: any) {
+        const message = error?.message || String(error);
+        const statusCode = message.includes('not found') ? 404 : 400;
+        res.status(statusCode).json({ error: message });
+      }
+    });
+
     this.app.post('/api/library/rescan', async (req, res) => {
       try {
         const count = await this.library.scan();
@@ -109,6 +178,36 @@ export class WebApiService {
         console.error(`[API] POST /api/playlists error:`, error);
         const message = error?.message || String(error);
         const statusCode = message.includes('already exists') ? 409 : 400;
+        res.status(statusCode).json({ error: message });
+      }
+    });
+
+    this.app.put('/api/playlists/reorder', (req, res) => {
+      try {
+        const { names } = req.body;
+        if (!names || !Array.isArray(names)) {
+          return res.status(400).json({ error: 'Playlist names array is required' });
+        }
+        this.playlists.reorderPlaylists(names);
+        res.json({ success: true });
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
+    });
+
+    this.app.put('/api/playlists/:name/rename', (req, res) => {
+      try {
+        const { name } = req.params;
+        const { newName } = req.body;
+        if (!newName || typeof newName !== 'string' || !newName.trim()) {
+          return res.status(400).json({ error: 'New playlist name is required' });
+        }
+        const playlist = this.playlists.rename(name, newName);
+        res.json({ success: true, playlist });
+      } catch (error: any) {
+        const message = error?.message || String(error);
+        const statusCode = message.includes('not found') ? 404
+          : message.includes('already exists') ? 409 : 400;
         res.status(statusCode).json({ error: message });
       }
     });

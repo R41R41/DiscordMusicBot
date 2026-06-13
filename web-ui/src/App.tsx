@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Music,
   Play,
@@ -23,6 +23,8 @@ import {
   CheckCircle,
   Sun,
   Moon,
+  Edit2,
+  ArrowLeft,
 } from "lucide-react";
 import type {
   PlayerState,
@@ -58,7 +60,13 @@ const formatTime = (seconds: number): string => {
 
 function App() {
   // State
-  const [playerState, setPlayerState] = useState<PlayerState | null>(null);
+  const [rawPlayerState, setRawPlayerState] = useState<PlayerState | null>(null);
+  // ローカル再生（VC未接続時）
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [localCurrent, setLocalCurrent] = useState<Track | null>(null);
+  const [localPaused, setLocalPaused] = useState(false);
+  const [localPosition, setLocalPosition] = useState(0);
+  const [localQueue, setLocalQueue] = useState<Track[]>([]);
   const [guilds, setGuilds] = useState<GuildInfo[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [selectedGuild, setSelectedGuild] = useState<string>("");
@@ -76,7 +84,7 @@ function App() {
   const [isSeeking, setIsSeeking] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [dragContext, setDragContext] = useState<"queue" | "playlist" | null>(
+  const [dragContext, setDragContext] = useState<"queue" | "playlist" | "playlistList" | null>(
     null,
   );
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
@@ -111,6 +119,12 @@ function App() {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
 
+  // リネーム
+  const [renamingPlaylist, setRenamingPlaylist] = useState<string | null>(null);
+  const [renamePlaylistValue, setRenamePlaylistValue] = useState("");
+  const [renameTrackId, setRenameTrackId] = useState<string | null>(null);
+  const [renameTrackValue, setRenameTrackValue] = useState("");
+
   // 設定関連
   const [settings, setSettings] = useState<api.AppSettings | null>(null);
   const [systemStatus, setSystemStatus] = useState<api.SystemStatus | null>(
@@ -125,14 +139,47 @@ function App() {
 
   // WebSocket接続
   useEffect(() => {
-    api.connectWebSocket(setPlayerState);
+    api.connectWebSocket(setRawPlayerState);
     return () => api.disconnectWebSocket();
   }, []);
+
+  // ローカルaudio要素の音量を playerState に合わせる
+  useEffect(() => {
+    if (audioRef.current && rawPlayerState) {
+      audioRef.current.volume = rawPlayerState.volume / 100;
+    }
+  }, [rawPlayerState?.volume]);
+
+  // 接続状態に応じてローカル再生 or Discord再生の state を合成
+  const isLocalMode = rawPlayerState?.connection !== "connected";
+  const playerState: PlayerState | null = rawPlayerState
+    ? isLocalMode
+      ? {
+          ...rawPlayerState,
+          current: localCurrent,
+          paused: localPaused,
+          position: localPosition,
+          queue: localQueue,
+        }
+      : rawPlayerState
+    : null;
 
   // 再生位置の定期更新（シーク中は停止）
   useEffect(() => {
     if (!playerState?.current || playerState.paused || isSeeking) {
       return;
+    }
+
+    // ローカル再生モード: audio要素から currentTime を取得
+    if (isLocalMode) {
+      const interval = setInterval(() => {
+        const audio = audioRef.current;
+        if (audio) {
+          setDisplayPosition(audio.currentTime);
+          setLocalPosition(audio.currentTime);
+        }
+      }, 100);
+      return () => clearInterval(interval);
     }
 
     const startPosition = playerState.position;
@@ -224,7 +271,7 @@ function App() {
       api.getSettings(),
       api.getSystemStatus(),
     ]);
-    setPlayerState(state);
+    setRawPlayerState(state);
     setGuilds(guildList);
     setTracks(trackList);
     setPlaylists(playlistList);
@@ -283,8 +330,34 @@ function App() {
     }
   };
 
+  // ===== ローカル再生ヘルパー =====
+  const playLocalTrack = (track: Track) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.src = api.getTrackStreamUrl(track.id);
+    audio.play().catch((err) => console.error("Local play failed:", err));
+    setLocalCurrent(track);
+    setLocalPaused(false);
+    setLocalPosition(0);
+    setDisplayPosition(0);
+  };
+
+  const findTrackById = (trackId: string): Track | undefined => {
+    return (
+      tracks.find((t) => t.id === trackId) ||
+      localQueue.find((t) => t.id === trackId) ||
+      (localCurrent?.id === trackId ? localCurrent : undefined) ||
+      selectedPlaylist?.tracks?.find((t) => t.id === trackId)
+    );
+  };
+
   // ===== 再生操作 =====
   const handlePlay = async (trackId: string) => {
+    if (isLocalMode) {
+      const track = findTrackById(trackId);
+      if (track) playLocalTrack(track);
+      return;
+    }
     try {
       await api.playTrack(trackId);
     } catch (error) {
@@ -293,6 +366,16 @@ function App() {
   };
 
   const handleQueue = async (trackId: string) => {
+    if (isLocalMode) {
+      const track = findTrackById(trackId);
+      if (!track) return;
+      if (!localCurrent) {
+        playLocalTrack(track);
+      } else {
+        setLocalQueue((q) => [...q, track]);
+      }
+      return;
+    }
     try {
       await api.queueTrack(trackId);
     } catch (error) {
@@ -301,6 +384,16 @@ function App() {
   };
 
   const handlePlayNext = async (trackId: string) => {
+    if (isLocalMode) {
+      const track = findTrackById(trackId);
+      if (!track) return;
+      if (!localCurrent) {
+        playLocalTrack(track);
+      } else {
+        setLocalQueue((q) => [track, ...q]);
+      }
+      return;
+    }
     try {
       await api.playNextInQueue(trackId);
     } catch (error) {
@@ -366,6 +459,17 @@ function App() {
   const handleBulkQueue = async () => {
     const ids = Array.from(selectedTrackIds);
     if (ids.length === 0) return;
+    if (isLocalMode) {
+      const toAdd = ids.map(findTrackById).filter((t): t is Track => !!t);
+      if (!localCurrent && toAdd.length > 0) {
+        playLocalTrack(toAdd[0]);
+        setLocalQueue((q) => [...q, ...toAdd.slice(1)]);
+      } else {
+        setLocalQueue((q) => [...q, ...toAdd]);
+      }
+      clearSelection();
+      return;
+    }
     try {
       await api.queueTracks(ids);
       clearSelection();
@@ -377,6 +481,17 @@ function App() {
   const handleBulkPlayNext = async () => {
     const ids = Array.from(selectedTrackIds);
     if (ids.length === 0) return;
+    if (isLocalMode) {
+      const toAdd = ids.map(findTrackById).filter((t): t is Track => !!t);
+      if (!localCurrent && toAdd.length > 0) {
+        playLocalTrack(toAdd[0]);
+        setLocalQueue((q) => [...toAdd.slice(1), ...q]);
+      } else {
+        setLocalQueue((q) => [...toAdd, ...q]);
+      }
+      clearSelection();
+      return;
+    }
     try {
       await api.playNextInQueueBulk(ids);
       clearSelection();
@@ -418,11 +533,14 @@ function App() {
       clearSelection();
     }
 
-    // メニューの推定高さ（項目数に応じて調整）
-    const menuHeight = 300;
+    // メニューの推定高さ（基本項目 + プレイリスト数に応じて動的に計算）
+    const baseItems = 5; // 再生、名前変更、次に再生、キューに追加、divider
+    const playlistItems = playlists.length + 1; // ラベル + 各プレイリスト
+    const itemHeight = 32;
+    const menuHeight = Math.min((baseItems + playlistItems) * itemHeight + 40, window.innerHeight - 20);
     const menuWidth = 200;
 
-    // 画面下にはみ出す場合は上方向に表示
+    // 画面内に収まるように位置を調整
     let y = e.clientY;
     let x = e.clientX;
 
@@ -457,13 +575,75 @@ function App() {
     }
   }, [contextMenu.visible]);
 
-  const handlePause = () => api.pausePlayer();
-  const handleResume = () => api.resumePlayer();
-  const handleSkip = () => api.skipTrack();
-  const handleStop = () => api.stopPlayer();
-  const handleClearQueue = () => api.clearQueue();
+  const handleLocalSkip = () => {
+    const next = localQueue[0];
+    if (next) {
+      setLocalQueue((q) => q.slice(1));
+      playLocalTrack(next);
+    } else {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.src = "";
+      }
+      setLocalCurrent(null);
+      setLocalPaused(false);
+      setLocalPosition(0);
+      setDisplayPosition(0);
+    }
+  };
+
+  const handlePause = () => {
+    if (isLocalMode) {
+      audioRef.current?.pause();
+      setLocalPaused(true);
+      return;
+    }
+    return api.pausePlayer();
+  };
+  const handleResume = () => {
+    if (isLocalMode) {
+      audioRef.current?.play().catch((err) => console.error(err));
+      setLocalPaused(false);
+      return;
+    }
+    return api.resumePlayer();
+  };
+  const handleSkip = () => {
+    if (isLocalMode) {
+      handleLocalSkip();
+      return;
+    }
+    return api.skipTrack();
+  };
+  const handleStop = () => {
+    if (isLocalMode) {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.pause();
+        audio.src = "";
+      }
+      setLocalCurrent(null);
+      setLocalPaused(false);
+      setLocalPosition(0);
+      setDisplayPosition(0);
+      return;
+    }
+    return api.stopPlayer();
+  };
+  const handleClearQueue = () => {
+    if (isLocalMode) {
+      setLocalQueue([]);
+      return;
+    }
+    return api.clearQueue();
+  };
 
   const handleRemoveFromQueue = async (index: number) => {
+    if (isLocalMode) {
+      setLocalQueue((q) => q.filter((_, i) => i !== index));
+      return;
+    }
     try {
       await api.removeFromQueue(index);
     } catch (error) {
@@ -472,6 +652,11 @@ function App() {
   };
 
   const handleVolumeChange = (volume: number) => {
+    if (isLocalMode) {
+      if (audioRef.current) audioRef.current.volume = volume / 100;
+      setRawPlayerState((s) => (s ? { ...s, volume } : s));
+      return;
+    }
     api.updateSettings({ volume });
   };
 
@@ -491,6 +676,12 @@ function App() {
   const handleSeek = async (position: number) => {
     setIsSeeking(true);
     setDisplayPosition(position);
+    if (isLocalMode) {
+      if (audioRef.current) audioRef.current.currentTime = position;
+      setLocalPosition(position);
+      setTimeout(() => setIsSeeking(false), 200);
+      return;
+    }
     try {
       await api.seekPlayer(position);
       // シーク完了後、少し待ってからサーバーの状態を反映
@@ -504,7 +695,7 @@ function App() {
   };
 
   // ===== ドラッグ&ドロップ =====
-  const handleDragStart = (index: number, context: "queue" | "playlist") => {
+  const handleDragStart = (index: number, context: "queue" | "playlist" | "playlistList") => {
     setDraggedIndex(index);
     setDragContext(context);
   };
@@ -580,6 +771,26 @@ function App() {
     handleDragEnd();
   };
 
+  const handlePlaylistListDrop = async () => {
+    const fromIndex = draggedIndex;
+    const toIndex = dragOverIndex;
+    if (fromIndex === null || toIndex === null || fromIndex === toIndex) {
+      handleDragEnd();
+      return;
+    }
+    const reordered = getReorderedList(playlists);
+    const names = reordered.map(p => p.name);
+    setPlaylists(reordered);
+    try {
+      await api.reorderPlaylists(names);
+    } catch (error) {
+      console.error("Failed to reorder playlists:", error);
+      const playlistList = await api.getPlaylists();
+      setPlaylists(playlistList);
+    }
+    handleDragEnd();
+  };
+
   // ===== ライブラリ操作 =====
   const handleSearch = useCallback(async (query: string) => {
     setSearchQuery(query);
@@ -640,6 +851,50 @@ function App() {
     }
   };
 
+  const handleRenamePlaylist = async (oldName: string, newName: string) => {
+    if (!newName.trim() || newName.trim() === oldName) {
+      setRenamingPlaylist(null);
+      return;
+    }
+    try {
+      await api.renamePlaylist(oldName, newName.trim());
+      const playlistList = await api.getPlaylists();
+      setPlaylists(playlistList);
+      if (selectedPlaylist?.name === oldName) {
+        const fullPlaylist = await api.getPlaylist(newName.trim());
+        setSelectedPlaylist(fullPlaylist);
+      }
+    } catch (error: any) {
+      console.error("Failed to rename playlist:", error);
+      setPlaylistError(error?.message || "プレイリスト名の変更に失敗しました");
+      setTimeout(() => setPlaylistError(""), 3000);
+    }
+    setRenamingPlaylist(null);
+  };
+
+  const handleRenameTrack = async (trackId: string, newTitle: string) => {
+    if (!newTitle.trim()) {
+      setRenameTrackId(null);
+      return;
+    }
+    try {
+      await api.renameTrack(trackId, newTitle.trim());
+      // ライブラリを再取得
+      const libraryTracks = await api.getLibrary(searchQuery || undefined);
+      setTracks(libraryTracks);
+      // プレイリストも更新
+      const playlistList = await api.getPlaylists();
+      setPlaylists(playlistList);
+      if (selectedPlaylist) {
+        const fullPlaylist = await api.getPlaylist(selectedPlaylist.name);
+        setSelectedPlaylist(fullPlaylist);
+      }
+    } catch (error: any) {
+      console.error("Failed to rename track:", error);
+    }
+    setRenameTrackId(null);
+  };
+
   const handleSelectPlaylist = async (playlist: Playlist) => {
     try {
       const fullPlaylist = await api.getPlaylist(playlist.name);
@@ -653,6 +908,27 @@ function App() {
     name: string,
     mode: "replace" | "append" = "replace",
   ) => {
+    if (isLocalMode) {
+      try {
+        const pl = await api.getPlaylist(name);
+        const list = pl.tracks || [];
+        if (list.length === 0) return;
+        if (mode === "replace") {
+          playLocalTrack(list[0]);
+          setLocalQueue(list.slice(1));
+        } else {
+          if (!localCurrent) {
+            playLocalTrack(list[0]);
+            setLocalQueue((q) => [...q, ...list.slice(1)]);
+          } else {
+            setLocalQueue((q) => [...q, ...list]);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to play playlist locally:", error);
+      }
+      return;
+    }
     try {
       await api.playPlaylist(name, mode);
     } catch (error) {
@@ -857,7 +1133,24 @@ function App() {
                       }
                     >
                       <div className="track-info">
-                        <div className="track-title">{track.title}</div>
+                        {renameTrackId === track.id ? (
+                          <input
+                            type="text"
+                            className="input"
+                            value={renameTrackValue}
+                            onChange={(e) => setRenameTrackValue(e.target.value)}
+                            onBlur={() => handleRenameTrack(track.id, renameTrackValue)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleRenameTrack(track.id, renameTrackValue);
+                              if (e.key === "Escape") setRenameTrackId(null);
+                            }}
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ fontSize: "0.875rem", padding: "2px 6px", width: "100%" }}
+                          />
+                        ) : (
+                          <div className="track-title">{track.title}</div>
+                        )}
                       </div>
                     </div>
                   ))
@@ -869,97 +1162,134 @@ function App() {
           {/* Playlists Tab */}
           {activeTab === "playlists" && (
             <>
-              <div className="search-bar">
-                <div className="input-group">
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="新しいプレイリスト名..."
-                    value={newPlaylistName}
-                    onChange={(e) => setNewPlaylistName(e.target.value)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && handleCreatePlaylist()
-                    }
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleCreatePlaylist}
-                  >
-                    <Plus size={16} />
-                  </button>
-                </div>
-                {playlistError && (
-                  <div
-                    style={{
-                      color: "var(--error)",
-                      fontSize: "0.8rem",
-                      marginTop: "var(--space-xs)",
-                    }}
-                  >
-                    {playlistError}
-                  </div>
-                )}
-              </div>
-              <div className="playlist-list">
-                {playlists.length === 0 ? (
-                  <div className="empty-state">
-                    <List size={48} />
-                    <p>プレイリストがありません</p>
-                  </div>
-                ) : (
-                  playlists.map((playlist) => (
-                    <div
-                      key={playlist.name}
-                      className={`playlist-item ${selectedPlaylist?.name === playlist.name ? "selected" : ""}`}
-                      onClick={() => handleSelectPlaylist(playlist)}
-                    >
-                      <div>
-                        <div className="playlist-name">{playlist.name}</div>
-                        <div className="playlist-count">
-                          {playlist.trackIds.length} 曲
-                        </div>
-                      </div>
-                      <div className="track-actions" style={{ opacity: 1 }}>
-                        <button
-                          className="btn btn-icon btn-ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handlePlayPlaylist(playlist.name);
-                          }}
-                          title="再生"
-                        >
-                          <Play size={16} />
-                        </button>
-                        <button
-                          className="btn btn-icon btn-ghost"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeletePlaylist(playlist.name);
-                          }}
-                          title="削除"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
+              {!selectedPlaylist ? (
+                <>
+                  <div className="search-bar">
+                    <div className="input-group">
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="新しいプレイリスト名..."
+                        value={newPlaylistName}
+                        onChange={(e) => setNewPlaylistName(e.target.value)}
+                        onKeyDown={(e) =>
+                          e.key === "Enter" && handleCreatePlaylist()
+                        }
+                      />
+                      <button
+                        className="btn btn-primary"
+                        onClick={handleCreatePlaylist}
+                      >
+                        <Plus size={16} />
+                      </button>
                     </div>
-                  ))
-                )}
-              </div>
-              {selectedPlaylist && selectedPlaylist.tracks && (
-                <div
-                  className="card-body"
-                  style={{ borderTop: "1px solid var(--border)" }}
-                >
-                  <h3
-                    style={{
-                      marginBottom: "var(--space-md)",
-                      fontSize: "0.875rem",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {selectedPlaylist.name} の曲
-                  </h3>
-                  {selectedTrackIds.size > 0 && activeTab === "playlists" && (
+                    {playlistError && (
+                      <div
+                        style={{
+                          color: "var(--error)",
+                          fontSize: "0.8rem",
+                          marginTop: "var(--space-xs)",
+                        }}
+                      >
+                        {playlistError}
+                      </div>
+                    )}
+                  </div>
+                  <div className="playlist-list">
+                    {playlists.length === 0 ? (
+                      <div className="empty-state">
+                        <List size={48} />
+                        <p>プレイリストがありません</p>
+                      </div>
+                    ) : (
+                      (dragContext === "playlistList" ? getReorderedList(playlists) : playlists).map((playlist, plIndex) => (
+                        <div
+                          key={playlist.name}
+                          className={`playlist-item ${dragContext === "playlistList" && dragOverIndex === plIndex ? "dragging" : ""}`}
+                          draggable
+                          onDragStart={() => handleDragStart(plIndex, "playlistList")}
+                          onDragOver={(e) => handleDragOver(e, plIndex)}
+                          onDrop={handlePlaylistListDrop}
+                          onDragEnd={handleDragEnd}
+                          onDoubleClick={() => handleSelectPlaylist(playlist)}
+                        >
+                          <div>
+                            {renamingPlaylist === playlist.name ? (
+                              <input
+                                type="text"
+                                className="input"
+                                value={renamePlaylistValue}
+                                onChange={(e) => setRenamePlaylistValue(e.target.value)}
+                                onBlur={() => handleRenamePlaylist(playlist.name, renamePlaylistValue)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleRenamePlaylist(playlist.name, renamePlaylistValue);
+                                  if (e.key === "Escape") setRenamingPlaylist(null);
+                                }}
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ fontSize: "0.875rem", padding: "2px 6px" }}
+                              />
+                            ) : (
+                              <div className="playlist-name">{playlist.name}</div>
+                            )}
+                            <div className="playlist-count">
+                              {playlist.trackIds.length} 曲
+                            </div>
+                          </div>
+                          <div className="track-actions" style={{ opacity: 1 }}>
+                            <button
+                              className="btn btn-icon btn-ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePlayPlaylist(playlist.name);
+                              }}
+                              title="再生"
+                            >
+                              <Play size={16} />
+                            </button>
+                            <button
+                              className="btn btn-icon btn-ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRenamingPlaylist(playlist.name);
+                                setRenamePlaylistValue(playlist.name);
+                              }}
+                              title="名前を変更"
+                            >
+                              <Edit2 size={16} />
+                            </button>
+                            <button
+                              className="btn btn-icon btn-ghost"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePlaylist(playlist.name);
+                              }}
+                              title="削除"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="card-header" style={{ display: "flex", alignItems: "center", gap: "var(--space-sm)" }}>
+                    <button
+                      className="btn btn-icon btn-ghost"
+                      onClick={() => setSelectedPlaylist(null)}
+                      title="プレイリスト一覧に戻る"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                    <span style={{ fontWeight: 600 }}>{selectedPlaylist.name}</span>
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+                      ({selectedPlaylist.trackIds.length} 曲)
+                    </span>
+                  </div>
+                  {selectedTrackIds.size > 0 && (
                     <div className="selection-bar">
                       <span>{selectedTrackIds.size} 曲を選択中</span>
                       <div className="selection-actions">
@@ -970,7 +1300,7 @@ function App() {
                     </div>
                   )}
                   <div className="track-list">
-                    {(dragContext === "playlist"
+                    {selectedPlaylist.tracks && (dragContext === "playlist"
                       ? getReorderedList(selectedPlaylist.tracks)
                       : selectedPlaylist.tracks
                     ).map((track, index) => {
@@ -1018,13 +1348,30 @@ function App() {
                             {index + 1}
                           </span>
                           <div className="track-info">
-                            <div className="track-title">{track.title}</div>
+                            {renameTrackId === track.id ? (
+                              <input
+                                type="text"
+                                className="input"
+                                value={renameTrackValue}
+                                onChange={(e) => setRenameTrackValue(e.target.value)}
+                                onBlur={() => handleRenameTrack(track.id, renameTrackValue)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") handleRenameTrack(track.id, renameTrackValue);
+                                  if (e.key === "Escape") setRenameTrackId(null);
+                                }}
+                                autoFocus
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ fontSize: "0.875rem", padding: "2px 6px", width: "100%" }}
+                              />
+                            ) : (
+                              <div className="track-title">{track.title}</div>
+                            )}
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                </div>
+                </>
               )}
             </>
           )}
@@ -1207,7 +1554,7 @@ function App() {
                       再スキャン
                     </button>
                   </div>
-                </div>
+      </div>
 
                 {/* 保存ボタン */}
                 <div className="settings-section">
@@ -1216,7 +1563,7 @@ function App() {
                     onClick={handleSaveSettings}
                   >
                     <Save size={16} /> 設定を保存
-                  </button>
+        </button>
                   {settingsSaved && (
                     <span className="save-success">
                       <CheckCircle size={14} /> 保存しました
@@ -1244,8 +1591,8 @@ function App() {
                     <p className="debug-hint">
                       ※
                       問題が発生した場合は、タスクトレイのアイコンを右クリックして「ログを開く」で詳細を確認できます。
-                    </p>
-                  </div>
+        </p>
+      </div>
                 </div>
               </div>
             </div>
@@ -1468,6 +1815,19 @@ function App() {
         </div>
       </main>
 
+      {/* ローカル再生用の非表示audio要素 */}
+      <audio
+        ref={audioRef}
+        onEnded={() => {
+          if (isLocalMode) handleLocalSkip();
+        }}
+        onPlay={() => setLocalPaused(false)}
+        onPause={() => {
+          if (audioRef.current && !audioRef.current.ended) setLocalPaused(true);
+        }}
+        style={{ display: "none" }}
+      />
+
       {/* コンテキストメニュー */}
       {contextMenu.visible && (() => {
         const isBulk = selectedTrackIds.size > 1 && selectedTrackIds.has(contextMenu.trackId);
@@ -1500,6 +1860,18 @@ function App() {
                 再生
               </button>
             )}
+            {!isBulk && (
+              <button
+                className="context-menu-item"
+                onClick={() => {
+                  setRenameTrackId(contextMenu.trackId);
+                  setRenameTrackValue(contextMenu.trackTitle);
+                  closeContextMenu();
+                }}
+              >
+                名前を変更
+              </button>
+            )}
             <button
               className="context-menu-item"
               onClick={() => {
@@ -1529,7 +1901,7 @@ function App() {
             {playlists.length > 0 && (
               <>
                 <div className="context-menu-divider" />
-                <div className="context-menu-submenu">
+                <div className="context-menu-submenu" style={{ maxHeight: "40vh", overflowY: "auto" }}>
                   <span className="context-menu-label">プレイリストに追加</span>
                   {playlists.map((pl) => (
                     <button

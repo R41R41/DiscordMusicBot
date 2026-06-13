@@ -57,6 +57,51 @@ export class PlaylistService {
     }
   }
 
+  // ===== プレイリスト並び順の保存/読み込み =====
+  private get orderFilePath(): string {
+    return join(this.playlistsDir, '_order.json');
+  }
+
+  private loadOrder(): string[] {
+    try {
+      if (existsSync(this.orderFilePath)) {
+        return JSON.parse(readFileSync(this.orderFilePath, 'utf-8'));
+      }
+    } catch (error) {
+      console.error('[Playlist] Failed to load order:', error);
+    }
+    return [];
+  }
+
+  private saveOrder(): void {
+    try {
+      const order = this.playlists.map(p => p.name);
+      writeFileSync(this.orderFilePath, JSON.stringify(order, null, 2), 'utf-8');
+    } catch (error) {
+      console.error('[Playlist] Failed to save order:', error);
+    }
+  }
+
+  private applyOrder(): void {
+    const order = this.loadOrder();
+    if (order.length === 0) return;
+
+    const map = new Map(this.playlists.map(p => [p.name, p]));
+    const ordered: Playlist[] = [];
+    for (const name of order) {
+      const pl = map.get(name);
+      if (pl) {
+        ordered.push(pl);
+        map.delete(name);
+      }
+    }
+    // 順番ファイルにないプレイリストは末尾に追加
+    for (const pl of map.values()) {
+      ordered.push(pl);
+    }
+    this.playlists = ordered;
+  }
+
   // ===== .m3u ファイルからプレイリストを読み込み =====
   private load(): void {
     try {
@@ -89,6 +134,7 @@ export class PlaylistService {
         }
       }
 
+      this.applyOrder();
       console.log(`[Playlist] Total: ${this.playlists.length} playlists loaded from ${this.playlistsDir}`);
     } catch (error) {
       console.error('[Playlist] Failed to load playlists:', error);
@@ -147,6 +193,7 @@ export class PlaylistService {
     };
     this.playlists.push(playlist);
     this.savePlaylist(playlist);
+    this.saveOrder();
     console.log(`[Playlist] Created playlist: "${name}" (total: ${this.playlists.length})`);
     return playlist;
   }
@@ -160,6 +207,46 @@ export class PlaylistService {
 
     this.playlists.splice(index, 1);
     this.deletePlaylistFile(name);
+    this.saveOrder();
+  }
+
+  // ===== プレイリスト名変更 =====
+  rename(oldName: string, newName: string): Playlist {
+    if (!newName || !newName.trim()) {
+      throw new Error('New playlist name is required');
+    }
+    newName = newName.trim();
+
+    const playlist = this.playlists.find(p => p.name === oldName);
+    if (!playlist) {
+      throw new Error(`Playlist not found: ${oldName}`);
+    }
+    if (this.playlists.some(p => p.name === newName)) {
+      throw new Error(`Playlist already exists: ${newName}`);
+    }
+
+    // 古い .m3u ファイルを削除
+    this.deletePlaylistFile(oldName);
+
+    // プレイリスト名を更新して新しいファイルに保存
+    playlist.name = newName;
+    this.savePlaylist(playlist);
+
+    this.saveOrder();
+    console.log(`[Playlist] Renamed "${oldName}" -> "${newName}"`);
+    return playlist;
+  }
+
+  // ===== トラックIDの一括置換（曲名変更時）=====
+  replaceTrackId(oldId: string, newId: string): void {
+    for (const playlist of this.playlists) {
+      const index = playlist.trackIds.indexOf(oldId);
+      if (index !== -1) {
+        playlist.trackIds[index] = newId;
+        this.savePlaylist(playlist);
+        console.log(`[Playlist] Updated trackId ${oldId} -> ${newId} in "${playlist.name}"`);
+      }
+    }
   }
 
   // ===== 曲操作 =====
@@ -198,6 +285,25 @@ export class PlaylistService {
 
     playlist.trackIds = trackIds.filter((id) => playlist.trackIds.includes(id));
     this.savePlaylist(playlist);
+  }
+
+  // ===== プレイリスト一覧の並び替え =====
+  reorderPlaylists(names: string[]): void {
+    const map = new Map(this.playlists.map(p => [p.name, p]));
+    const ordered: Playlist[] = [];
+    for (const name of names) {
+      const pl = map.get(name);
+      if (pl) {
+        ordered.push(pl);
+        map.delete(name);
+      }
+    }
+    for (const pl of map.values()) {
+      ordered.push(pl);
+    }
+    this.playlists = ordered;
+    this.saveOrder();
+    console.log(`[Playlist] Reordered playlists: ${names.join(', ')}`);
   }
 
   // ===== 再読み込み =====

@@ -1,5 +1,5 @@
-import { readdirSync, statSync, existsSync } from 'fs';
-import { join, basename, extname } from 'path';
+import { readdirSync, statSync, existsSync, renameSync } from 'fs';
+import { join, basename, extname, dirname } from 'path';
 import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 import type { Track, Config } from '../types.js';
@@ -103,6 +103,44 @@ export class LibraryService {
   // ===== トラック数 =====
   getTrackCount(): number {
     return this.tracks.size;
+  }
+
+  // ===== 曲名変更（ファイルリネーム）=====
+  renameTrack(id: string, newTitle: string): { track: Track; oldId: string } {
+    const track = this.tracks.get(id);
+    if (!track) {
+      throw new Error(`Track not found: ${id}`);
+    }
+    if (!newTitle || !newTitle.trim()) {
+      throw new Error('New title is required');
+    }
+
+    const dir = dirname(track.path);
+    const ext = extname(track.path);
+    const newPath = join(dir, `${newTitle.trim()}${ext}`);
+
+    if (existsSync(newPath) && newPath !== track.path) {
+      throw new Error(`File already exists: ${newTitle.trim()}${ext}`);
+    }
+
+    // ファイルをリネーム
+    renameSync(track.path, newPath);
+
+    // 古いトラックを削除
+    this.tracks.delete(id);
+
+    // 新しいIDとトラック情報を生成
+    const newId = this.generateId(newPath);
+    const newTrack: Track = {
+      id: newId,
+      title: newTitle.trim(),
+      path: newPath,
+      duration: track.duration,
+    };
+    this.tracks.set(newId, newTrack);
+
+    console.log(`[Library] Renamed track "${track.title}" -> "${newTitle.trim()}" (${id} -> ${newId})`);
+    return { track: newTrack, oldId: id };
   }
 
   // ===== 複数ID から取得 =====

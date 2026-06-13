@@ -15,7 +15,7 @@
     "electron": "electron electron/main.cjs",
     "clean:release": "node -e \"const fs=require('fs');const p=require('path');const d='release';if(fs.existsSync(d)){fs.readdirSync(d).forEach(f=>{const fp=p.join(d,f);fs.statSync(fp).isDirectory()?fs.rmSync(fp,{recursive:true}):fs.unlinkSync(fp)});console.log('Cleaned release folder')}\"",
     "dist": "npm run clean:release && npm run build:all && electron-builder",
-    "dist:win": "npm run clean:release && npm run build:all && electron-builder --win"
+    "dist:win": "npm run clean:release && npm run build:all && node --max-old-space-size=8192 ./node_modules/electron-builder/out/cli/cli.js --win"
   },
   "keywords": [
     "discord",
@@ -91,6 +91,7 @@
       "signAndEditExecutable": false
     },
     "forceCodeSigning": false,
+    "compression": "store",
     "nsis": {
       "oneClick": true,
       "allowElevation": true,
